@@ -5856,14 +5856,12 @@ export default function App() {
         const cached = JSON.parse(raw) as AuthPayload;
         setAuth(cached);
 
-        try {
-          await apiRequest("/api/auth/me", {}, cached.token, { timeoutMs: 12000 });
-        } catch (error) {
+        void apiRequest("/api/auth/me", {}, cached.token, { timeoutMs: 8000 }).catch(async (error) => {
           if (isUnauthorizedError(error)) {
             await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
             setAuth(null);
           }
-        }
+        });
       } catch {
         setAuth(null);
       } finally {
