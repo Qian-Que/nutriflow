@@ -7,3 +7,6 @@ server/data
 mobile/.expo
 mobile_git_backup_*
 server/tmp_*
+.playwright-cli/
+output/playwright/
+mobile/dist-web/

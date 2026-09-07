@@ -7,6 +7,8 @@ import { config } from "./config";
 import { startRetentionJob } from "./lib/retention";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import { authRouter } from "./routes/auth";
+import { adminRouter } from "./routes/admin";
+import { dataRouter } from "./routes/data";
 import { classifierRouter } from "./routes/classifier";
 import { exercisesRouter } from "./routes/exercises";
 import { feedRouter } from "./routes/feed";
@@ -26,10 +28,12 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "nutrition-server" });
+  res.json({ ok: true, service: "nutrition-server", release: "2026-09-08-r15", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
 });
 
 app.use("/api/auth", authRouter);
+app.use("/api/admin", adminRouter);
+app.use("/api/data", dataRouter);
 app.use("/api/profile", profileRouter);
 app.use("/api/classifier", classifierRouter);
 app.use("/api/nutrition", nutritionRouter);

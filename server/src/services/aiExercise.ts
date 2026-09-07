@@ -1,5 +1,7 @@
 import { config } from "../config";
 
+import { getAIConfig } from "../lib/aiSettings";
+
 export type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
 
 export type AIUsage = {
@@ -78,6 +80,7 @@ export function estimateExerciseCalories(met: number, weightKg: number, duration
 }
 
 function buildPrimaryClientConfig(): AIClientConfig | null {
+  const config = getAIConfig();
   const apiKey = String(config.aiApiKey ?? "").trim();
   if (!apiKey) {
     return null;
@@ -97,6 +100,7 @@ function buildPrimaryClientConfig(): AIClientConfig | null {
 }
 
 function buildBackupClientConfig(): AIClientConfig | null {
+  const config = getAIConfig();
   const backupKey = String(config.aiBackupApiKey ?? "").trim();
   const backupBaseUrl = String(config.aiBackupBaseUrl ?? "").trim();
   const backupModel = String(config.aiBackupModel ?? "").trim();

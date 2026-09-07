@@ -1,5 +1,7 @@
 ﻿import { config } from "../config";
 
+import { getAIConfig } from "../lib/aiSettings";
+
 export type NutritionItem = {
   name: string;
   estimatedWeightGram?: number;
@@ -289,6 +291,7 @@ function enrichTotalsByHeuristics(totals: NutritionTotals, items: NutritionItem[
 }
 
 function resolveProvider(rawInput?: string): AIProvider {
+  const config = getAIConfig();
   const raw = String(rawInput ?? config.aiProvider ?? "openai").toLowerCase();
 
   if (raw === "gemini" || raw === "gemini_native" || raw === "google_gemini") {
@@ -308,6 +311,7 @@ function resolveProvider(rawInput?: string): AIProvider {
 }
 
 function resolveImageDetail(rawInput?: string): "low" | "high" | "auto" {
+  const config = getAIConfig();
   const detail = String(rawInput ?? config.aiImageDetail ?? "auto").toLowerCase();
   if (detail === "low" || detail === "high") {
     return detail;
@@ -346,6 +350,7 @@ function normalizeProviderForBaseUrl(provider: AIProvider, baseUrl: string): AIP
 }
 
 function buildPrimaryClientConfig(): AIClientConfig | null {
+  const config = getAIConfig();
   const apiKey = String(config.aiApiKey ?? "").trim();
   if (!apiKey) {
     return null;
@@ -367,6 +372,7 @@ function buildPrimaryClientConfig(): AIClientConfig | null {
 }
 
 function buildBackupClientConfig(): AIClientConfig | null {
+  const config = getAIConfig();
   const backupKey = String(config.aiBackupApiKey ?? "").trim();
   const backupBaseUrl = String(config.aiBackupBaseUrl ?? "").trim();
   const backupModel = String(config.aiBackupModel ?? "").trim();

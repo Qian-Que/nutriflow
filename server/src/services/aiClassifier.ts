@@ -1,5 +1,7 @@
 import { config } from "../config";
 
+import { getAIConfig } from "../lib/aiSettings";
+
 export type EntryKind = "FOOD" | "EXERCISE" | "UNKNOWN";
 
 export type AIUsage = {
@@ -70,6 +72,7 @@ function toNumber(value: unknown, fallback: number) {
 }
 
 function buildPrimaryClientConfig(): AIClientConfig | null {
+  const config = getAIConfig();
   const apiKey = String(config.aiApiKey ?? "").trim();
   if (!apiKey) {
     return null;
@@ -89,6 +92,7 @@ function buildPrimaryClientConfig(): AIClientConfig | null {
 }
 
 function buildBackupClientConfig(): AIClientConfig | null {
+  const config = getAIConfig();
   const backupKey = String(config.aiBackupApiKey ?? "").trim();
   const backupBaseUrl = String(config.aiBackupBaseUrl ?? "").trim();
   const backupModel = String(config.aiBackupModel ?? "").trim();

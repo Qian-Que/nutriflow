@@ -1,10 +1,11 @@
 import { db } from "./db";
 
-const RETENTION_DAYS = 60;
-
 export function pruneOldTimeSeriesData() {
+  // History is permanent by default; destructive retention requires an explicit setting.
+  const retentionDays = Number(process.env.DATA_RETENTION_DAYS ?? 0);
+  if (!Number.isInteger(retentionDays) || retentionDays <= 0) return;
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - RETENTION_DAYS);
+  cutoff.setDate(cutoff.getDate() - retentionDays);
   const cutoffIso = cutoff.toISOString();
 
   db.exec("BEGIN");
@@ -17,13 +18,12 @@ export function pruneOldTimeSeriesData() {
       .run(cutoffIso);
     const foodLogs = db.prepare("DELETE FROM food_logs WHERE logged_at < ?").run(cutoffIso);
     const exerciseLogs = db.prepare("DELETE FROM exercise_logs WHERE logged_at < ?").run(cutoffIso);
-    const weightLogs = db.prepare("DELETE FROM weight_logs WHERE logged_at < ?").run(cutoffIso);
 
     const result = {
       groupPosts: Number(groupPosts.changes),
       foodLogs: Number(foodLogs.changes),
       exerciseLogs: Number(exerciseLogs.changes),
-      weightLogs: Number(weightLogs.changes),
+      weightLogs: 0,
     };
     db.exec("COMMIT");
 

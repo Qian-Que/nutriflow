@@ -1,5 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { Ionicons } from "@expo/vector-icons";
+import { acknowledge, bindStorageSession, enqueue, markPendingError, readCache, readDraft, readPending, subscribePending, updatePending, writeCache, writeDraft, type PendingWrite } from "./offlineStore";
+import { SettingsPanel } from "./SettingsPanel";
+import { scaleNutrients } from "./nutritionEditing";
+import { TrendSummary } from "./TrendSummary";
 import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
@@ -7,6 +12,7 @@ import { StatusBar } from "expo-status-bar";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Image,
   Modal,
@@ -17,7 +23,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const AUTH_STORAGE_KEY = "nutrition_app_auth_v1";
 const API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v2";
@@ -25,7 +31,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-05-07-r14";
+const APP_BUILD_LABEL = "2026-09-08-r15";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -34,11 +40,11 @@ const ANALYZE_REQUEST_TIMEOUT_MS =
 const CALORIE_RING_SEGMENT_COUNT = 28;
 const CALORIE_RING_CENTER = 48;
 const CALORIE_RING_RADIUS = 39;
-const tabIconMap: Record<string, string> = {
-  记录: "⌂",
-  目标: "◎",
-  体重: "◇",
-  动态: "✦",
+const tabIconMap: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
+  记录: "restaurant-outline",
+  目标: "flag-outline",
+  体重: "analytics-outline",
+  动态: "people-outline",
 };
 
 type JournalThemeMode = "day" | "night";
@@ -74,21 +80,21 @@ const journalThemeTokens: Record<
   }
 > = {
   day: {
-    background: "#f4f1ec",
-    surface: "#fffdf8",
-    surfaceAlt: "#f8f3eb",
-    surfaceSoft: "#efe6da",
-    border: "#e5dacb",
-    borderStrong: "#d8c6b4",
-    input: "#fffaf3",
-    text: "#27231f",
-    textMuted: "#7a6f66",
-    textSoft: "#5f544c",
-    activeText: "#ffffff",
-    accent: "#8a6f62",
-    accentSoft: "#e8d8ce",
-    chartTrack: "#eee5dc",
-    calorie: "#9b7d71",
+    background: "#f3f5f4",
+    surface: "#ffffff",
+    surfaceAlt: "#edf2f0",
+    surfaceSoft: "#e2eee8",
+    border: "#dce3df",
+    borderStrong: "#b9c8c0",
+    input: "#f9fbfa",
+    text: "#202923",
+    textMuted: "#637369",
+    textSoft: "#42584b",
+    activeText: "#164f36",
+    accent: "#26734f",
+    accentSoft: "#dcefe3",
+    chartTrack: "#e5eae7",
+    calorie: "#26734f",
     carbs: "#ed6b75",
     protein: "#59b5df",
     fat: "#f0cf3b",
@@ -96,26 +102,26 @@ const journalThemeTokens: Record<
     exercise: "#6aa6ff",
     danger: "#d75b5b",
     placeholder: "#9b9188",
-    tabBar: "#fffaf3",
-    tabBorder: "#e1d6c7",
+    tabBar: "#ffffff",
+    tabBorder: "#cdd8d1",
     statusBar: "dark",
   },
   night: {
-    background: "#081223",
-    surface: "#101c31",
-    surfaceAlt: "#0d182a",
-    surfaceSoft: "#132843",
-    border: "#243146",
-    borderStrong: "#36507b",
-    input: "#111b2d",
+    background: "#151918",
+    surface: "#202725",
+    surfaceAlt: "#1b211f",
+    surfaceSoft: "#2b3731",
+    border: "#36413b",
+    borderStrong: "#56695e",
+    input: "#181e1b",
     text: "#f4f9ff",
-    textMuted: "#93a9cc",
-    textSoft: "#c8d7f3",
+    textMuted: "#a0b3a8",
+    textSoft: "#d0ded6",
     activeText: "#f7fbff",
-    accent: "#4f88ff",
-    accentSoft: "#1b2c4e",
-    chartTrack: "#273245",
-    calorie: "#a89186",
+    accent: "#65b98b",
+    accentSoft: "#284c38",
+    chartTrack: "#3a443f",
+    calorie: "#65b98b",
     carbs: "#f06d76",
     protein: "#62c3ed",
     fat: "#f3d845",
@@ -123,8 +129,8 @@ const journalThemeTokens: Record<
     exercise: "#8ab6ff",
     danger: "#ff8080",
     placeholder: "#8f9bb0",
-    tabBar: "#0f1724",
-    tabBorder: "#273245",
+    tabBar: "#1b211f",
+    tabBorder: "#3a443f",
     statusBar: "light",
   },
 };
@@ -786,87 +792,40 @@ function isAmbiguousWriteError(error: unknown) {
   return error instanceof ApiRequestError && (error.status === undefined || error.status >= 500);
 }
 
-function isSameLoggedMoment(actual: string, expected: string) {
-  const actualTime = new Date(actual).getTime();
-  const expectedTime = new Date(expected).getTime();
-  return Number.isFinite(actualTime) && Number.isFinite(expectedTime) && Math.abs(actualTime - expectedTime) <= 1500;
-}
-
-function isNearlyEqual(actual: number | null | undefined, expected: number, tolerance = 0.2) {
-  return Math.abs(Number(actual ?? 0) - expected) <= tolerance;
-}
-
-async function verifyAmbiguousWrite(check: () => Promise<boolean>) {
-  let checked = false;
-  let lastError: unknown;
-  for (const waitMs of [0, 700, 1800, 3200]) {
-    if (waitMs > 0) {
-      await delay(waitMs);
-    }
-    try {
-      const found = await check();
-      checked = true;
-      if (found) {
-        return { confirmed: true, checked: true, lastError: undefined };
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  return { confirmed: false, checked, lastError };
-}
-
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function persistWithAmbiguousRecovery<T>(
+const syncJobs = new Map<string, Promise<void>>();
+function syncPendingWrites(token: string) {
+  const running = syncJobs.get(token);
+  if (running) return running;
+  const job = (async () => {
+    for (const entry of await readPending(token)) {
+      if (entry.error || entry.serverRecord) continue;
+      try {
+        const result = await rawApiRequest<{ log?: Record<string, any>; exercise?: Record<string, any> }>(entry.path, { method: "POST", body: JSON.stringify(entry.body) }, token, { timeoutMs: 10000 });
+        const record = result.log ?? result.exercise;
+        if (!record?.id) throw new Error('保存响应不完整，请重试同步');
+        await acknowledge(token, entry.id, record);
+      } catch (error) {
+        if (!isAmbiguousWriteError(error)) await markPendingError(token, entry.id, normalizeErrorMessage(error));
+        break;
+      }
+    }
+  })().finally(() => syncJobs.delete(token));
+  syncJobs.set(token, job);
+  return job;
+}
+
+async function persistWithAmbiguousRecovery(
   path: string,
   body: Record<string, unknown>,
   token: string,
-  verify: () => Promise<boolean>,
 ): Promise<"saved" | "pending"> {
-  const persist = () => apiRequest<T>(path, { method: "POST", body: JSON.stringify(body) }, token);
-
-  try {
-    await persist();
-    return "saved";
-  } catch (firstError) {
-    if (!isAmbiguousWriteError(firstError)) {
-      throw firstError;
-    }
-
-    const firstVerification = await verifyAmbiguousWrite(verify);
-    if (isUnauthorizedError(firstVerification.lastError)) {
-      throw firstVerification.lastError;
-    }
-    if (firstVerification.confirmed) {
-      return "saved";
-    }
-    if (!firstVerification.checked) {
-      return "pending";
-    }
-
-    try {
-      await persist();
-      return "saved";
-    } catch (retryError) {
-      if (!isAmbiguousWriteError(retryError)) {
-        throw retryError;
-      }
-      const retryVerification = await verifyAmbiguousWrite(verify);
-      if (isUnauthorizedError(retryVerification.lastError)) {
-        throw retryVerification.lastError;
-      }
-      if (retryVerification.confirmed) {
-        return "saved";
-      }
-      if (!retryVerification.checked) {
-        return "pending";
-      }
-      throw retryError;
-    }
-  }
+  await enqueue(token, path, { ...body, ...(typeof body.note === 'string' ? { note: body.note.slice(0, 300) } : {}) });
+  await syncPendingWrites(token);
+  return (await readPending(token)).some(entry => entry.id === body.clientRequestId && !entry.serverRecord) ? "pending" : "saved";
 }
 
 function estimateFromDescription(description: string, hasImage: boolean): NutritionAnalysis {
@@ -967,7 +926,22 @@ function isUnauthorizedError(error: unknown) {
   );
 }
 
-async function apiRequest<T>(
+async function apiRequest<T>(path: string, init: RequestInit = {}, token?: string, options?: { timeoutMs?: number }): Promise<T> {
+  const cacheable = token && (!init.method || init.method === "GET") && /^\/api\/(logs|exercises|weights|profile)(\/|\?|$)/.test(path);
+  try {
+    const result = await rawApiRequest<T>(path, init, token, options);
+    if (cacheable) void writeCache(token, path, result).catch(() => {});
+    return result;
+  } catch (error) {
+    if (cacheable && isAmbiguousWriteError(error)) {
+      const cached = await readCache<T>(token, path);
+      if (cached) return { ...cached, _offline: true };
+    }
+    throw error;
+  }
+}
+
+async function rawApiRequest<T>(
   path: string,
   init: RequestInit = {},
   token?: string,
@@ -1011,12 +985,14 @@ async function apiRequest<T>(
       }, timeoutMs);
 
       let response: Response;
+      let text: string;
       try {
         response = await fetch(`${currentBaseUrl}${path}`, {
           ...init,
           headers,
           signal: controller.signal,
         });
+        text = await response.text();
       } catch (error) {
         clearTimeout(timeout);
         lastNetworkError = error;
@@ -1035,7 +1011,6 @@ async function apiRequest<T>(
         clearTimeout(timeout);
       }
 
-      const text = await response.text();
       let payload: { message?: string } = {};
       if (text) {
         try {
@@ -1904,7 +1879,10 @@ function NumberInput({
   const theme = useJournalTheme();
   const themed = useThemedAppStyles();
   return (
+    <View style={{ gap: 4 }}>
+    <Text style={[styles.hint, themed.hint]}>{placeholder}</Text>
     <TextInput
+      accessibilityLabel={placeholder}
       style={[styles.input, themed.input]}
       value={value}
       onChangeText={onChangeText}
@@ -1912,6 +1890,7 @@ function NumberInput({
       placeholder={placeholder}
       placeholderTextColor={theme.placeholder}
     />
+    </View>
   );
 }
 
@@ -2274,16 +2253,23 @@ function DashboardScreen({
   onAuthInvalid,
   journalThemeMode,
   onJournalThemeModeChange,
+  onOpenSettings,
 }: {
   token: string;
   onAuthInvalid: () => void;
   journalThemeMode: JournalThemeMode;
   onJournalThemeModeChange: (mode: JournalThemeMode) => void;
+  onOpenSettings: () => void;
 }) {
-  const [logs, setLogs] = useState<FoodLog[]>([]);
-  const [summary, setSummary] = useState({ calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 });
-  const [exercises, setExercises] = useState<ExerciseLog[]>([]);
-  const [exerciseSummary, setExerciseSummary] = useState({ calories: 0, durationMin: 0 });
+  const [savedLogs, setLogs] = useState<FoodLog[]>([]);
+  const [, setSummary] = useState({ calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 });
+  const [savedExercises, setExercises] = useState<ExerciseLog[]>([]);
+  const [, setExerciseSummary] = useState({ calories: 0, durationMin: 0 });
+  const [pending, setPending] = useState<PendingWrite[]>([]);
+  const waiting = pending.filter(entry => !entry.serverRecord);
+  const [favorites, setFavorites] = useState<FoodLog[]>([]);
+  const [draftReady, setDraftReady] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
   const [previousDayNetCalories, setPreviousDayNetCalories] = useState<number | null>(null);
   const [dailyTarget, setDailyTarget] = useState<null | {
     targetCalories: number | null;
@@ -2296,6 +2282,24 @@ function DashboardScreen({
   const [loading, setLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayDateString());
+  const logs = useMemo(() => {
+    const items = new Map(savedLogs.filter(log => !log.id.startsWith('pending-') && toLogDate(log.loggedAt) === selectedDate).map(log => [log.clientRequestId || log.id, log]));
+    for (const entry of pending) {
+      if (entry.path === '/api/logs' && toLogDate(entry.body.loggedAt) === selectedDate && !items.has(entry.id)) {
+        items.set(entry.id, (entry.serverRecord ?? { ...entry.body, id: `pending-${entry.id}` }) as FoodLog);
+      }
+    }
+    return [...items.values()];
+  }, [savedLogs, pending, selectedDate]);
+  const summary = useMemo(() => summarizeLogs(logs), [logs]);
+  const exercises = useMemo(() => {
+    const items = new Map(savedExercises.filter(log => !log.id.startsWith('pending-') && toLogDate(log.loggedAt) === selectedDate).map(log => [log.clientRequestId || log.id, log]));
+    for (const entry of pending) {
+      if (entry.path === '/api/exercises' && toLogDate(entry.body.loggedAt) === selectedDate && !items.has(entry.id)) items.set(entry.id, (entry.serverRecord ?? { ...entry.body, id: `pending-${entry.id}` }) as ExerciseLog);
+    }
+    return [...items.values()];
+  }, [savedExercises, pending, selectedDate]);
+  const exerciseSummary = useMemo(() => exercises.reduce((sum, entry) => ({ calories: sum.calories + entry.calories, durationMin: sum.durationMin + entry.durationMin }), { calories: 0, durationMin: 0 }), [exercises]);
   const [selectedMonth, setSelectedMonth] = useState(toMonthString(todayDateString()));
   const [monthStats, setMonthStats] = useState<Record<string, CalendarDaySummary>>({});
   const [calendarExpanded, setCalendarExpanded] = useState(false);
@@ -2309,6 +2313,9 @@ function DashboardScreen({
   const [detailLogId, setDetailLogId] = useState<string | null>(null);
   const [detailExerciseId, setDetailExerciseId] = useState<string | null>(null);
   const [editLogId, setEditLogId] = useState<string | null>(null);
+  const [editPortion, setEditPortion] = useState(1);
+  const [editItems, setEditItems] = useState<NutritionItem[]>([]);
+  const [editMealType, setEditMealType] = useState<MealType>('SNACK');
   const [editNote, setEditNote] = useState('');
   const [editCalories, setEditCalories] = useState('');
   const [editProtein, setEditProtein] = useState('');
@@ -2422,6 +2429,32 @@ function DashboardScreen({
     setConversationImageMimeType('image/jpeg');
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void readDraft(token).then(draft => {
+      if (!active || !draft) return;
+      setConversationInput(draft.text);
+      setConversationImageBase64(draft.imageBase64);
+      setConversationImageMimeType(draft.mimeType);
+      setConversationImageUri(draft.imageBase64 ? `data:${draft.mimeType};base64,${draft.imageBase64}` : null);
+      if (draft.text || draft.imageBase64) setSelectedDate(draft.date);
+    }).catch(() => { if (active) setSyncMessage('本地草稿读取失败，请检查存储空间'); }).finally(() => { if (active) setDraftReady(true); });
+    const refresh = () => { void readPending(token).then(entries => { if (active) setPending(entries); }).catch(() => { if (active) setSyncMessage('本地待同步记录读取失败'); }); };
+    void readCache<FoodLog[]>(token, 'favorites').then(items => { if (active) setFavorites(items ?? []); }).catch(() => {});
+    refresh();
+    const unsubscribe = subscribePending(refresh);
+    return () => { active = false; unsubscribe(); };
+  }, [token]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    const timer = setTimeout(() => {
+      void writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate })
+        .catch(() => setSyncMessage('草稿未保存到本地，请检查存储空间'));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [draftReady, token, conversationInput, conversationImageBase64, conversationImageMimeType, selectedDate]);
+
   const resetEditState = useCallback(() => {
     setEditLogId(null);
     setEditNote('');
@@ -2450,96 +2483,36 @@ function DashboardScreen({
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     setLoading(true);
+    const foodPath = `/api/logs?date=${selectedDate}`;
+    const exercisePath = `/api/exercises?date=${selectedDate}`;
     try {
-      const [logPayload, targetPayload] = await Promise.all([
-        apiRequest<{
-          logs: FoodLog[];
-          summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
-        }>(`/api/logs?date=${selectedDate}`, {}, token),
-        apiRequest<{
-          profile: {
-            targetCalories: number | null;
-            targetProteinGram: number | null;
-            targetCarbsGram: number | null;
-            targetFatGram: number | null;
-            targetWeightKg?: number | null;
-            weeklyWeightChangeKg?: number | null;
-          };
-        }>('/api/profile/targets', {}, token),
+      const [cachedFood, cachedExercise] = await Promise.all([
+        readCache<{ logs: FoodLog[] }>(token, foodPath),
+        readCache<{ exercises: ExerciseLog[] }>(token, exercisePath),
       ]);
-
-      let exercisePayload: {
-        exercises: ExerciseLog[];
-        summary: { calories: number; durationMin: number };
-      } = {
-        exercises: [],
-        summary: { calories: 0, durationMin: 0 },
-      };
-      try {
-        exercisePayload = await apiRequest<{
-          exercises: ExerciseLog[];
-          summary: { calories: number; durationMin: number };
-        }>(`/api/exercises?date=${selectedDate}`, {}, token);
-      } catch (exerciseError) {
-        if (isUnauthorizedError(exerciseError)) {
-          onAuthInvalid();
-          return;
-        }
-        if (!isEndpointNotFound(exerciseError)) {
-          throw exerciseError;
-        }
-      }
-
-      let nextPreviousDayNetCalories: number | null = null;
-      const previousDate = shiftDateString(selectedDate, -1);
-      try {
-        const previousLogPayload = await apiRequest<{
-          logs: FoodLog[];
-          summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
-        }>(`/api/logs?date=${previousDate}`, {}, token);
-
-        let previousExerciseCalories = 0;
-        try {
-          const previousExercisePayload = await apiRequest<{
-            exercises: ExerciseLog[];
-            summary: { calories: number; durationMin: number };
-          }>(`/api/exercises?date=${previousDate}`, {}, token);
-          previousExerciseCalories = Number(previousExercisePayload.summary.calories ?? 0);
-        } catch (previousExerciseError) {
-          if (isUnauthorizedError(previousExerciseError)) {
-            onAuthInvalid();
-            return;
-          }
-          if (!isEndpointNotFound(previousExerciseError)) {
-            throw previousExerciseError;
-          }
-        }
-        nextPreviousDayNetCalories = Math.round(Number(previousLogPayload.summary.calories ?? 0) - previousExerciseCalories);
-      } catch (previousDayError) {
-        if (isUnauthorizedError(previousDayError)) {
-          onAuthInvalid();
-          return;
-        }
-        nextPreviousDayNetCalories = null;
-      }
-
-      setLogs(logPayload.logs);
-      setSummary(logPayload.summary);
-      setExercises(exercisePayload.exercises);
-      setExerciseSummary(exercisePayload.summary);
-      setDailyTarget(targetPayload.profile);
-      setPreviousDayNetCalories(nextPreviousDayNetCalories);
-    } catch (error) {
-      if (isUnauthorizedError(error)) {
-        onAuthInvalid();
-        return;
-      }
-      if (!options?.silent) {
-        Alert.alert('加载失败', normalizeErrorMessage(error));
-      }
-    } finally {
-      setLoading(false);
-    }
+      if (cachedFood) setLogs(cachedFood.logs);
+      if (cachedExercise) setExercises(cachedExercise.exercises);
+      const results = await Promise.allSettled([
+        apiRequest<{ logs: FoodLog[]; _offline?: boolean }>(foodPath, {}, token, { timeoutMs: 8000 }),
+        apiRequest<{ exercises: ExerciseLog[]; _offline?: boolean }>(exercisePath, {}, token, { timeoutMs: 8000 }),
+        apiRequest<{ profile: NonNullable<typeof dailyTarget>; _offline?: boolean }>('/api/profile/targets', {}, token, { timeoutMs: 8000 }),
+      ]);
+      const [food, exercise, target] = results;
+      if (results.some(result => result.status === 'rejected' && isUnauthorizedError(result.reason))) { onAuthInvalid(); return; }
+      if (food.status === 'fulfilled') setLogs(food.value.logs);
+      if (exercise.status === 'fulfilled') setExercises(exercise.value.exercises);
+      if (target.status === 'fulfilled') setDailyTarget(target.value.profile);
+      const offline = results.some(result => result.status === 'rejected' || result.value._offline);
+      setSyncMessage(offline ? '当前显示本地记录，联网后更新' : '');
+      const known = new Set([
+        ...(food.status === 'fulfilled' ? food.value.logs.map(log => log.clientRequestId) : []),
+        ...(exercise.status === 'fulfilled' ? exercise.value.exercises.map(log => log.clientRequestId) : []),
+      ]);
+      await updatePending(token, entries => entries.filter(entry => !entry.serverRecord || !known.has(entry.id)));
+      setPreviousDayNetCalories(null);
+    } catch {
+      if (!options?.silent) setSyncMessage('暂时无法连接，已保留本地记录和草稿');
+    } finally { setLoading(false); }
   }, [onAuthInvalid, selectedDate, token]);
 
   const loadCalendar = useCallback(async (options?: { silent?: boolean }) => {
@@ -2561,7 +2534,7 @@ function DashboardScreen({
         return;
       }
       if (!options?.silent) {
-        Alert.alert('加载日历失败', normalizeErrorMessage(error));
+        setSyncMessage('日历暂未更新，稍后可以重试');
       }
     } finally {
       setCalendarLoading(false);
@@ -2570,11 +2543,15 @@ function DashboardScreen({
 
   const openEditLogModal = useCallback(
     (log: FoodLog) => {
+      if (log.id.startsWith('pending-')) { Alert.alert('待同步', '请先同步这条记录，再编辑。'); return; }
       const nextVisibility: Visibility =
         log.visibility === 'FRIENDS' || log.visibility === 'PUBLIC' || log.visibility === 'PRIVATE'
           ? log.visibility
           : 'PRIVATE';
       setEditLogId(log.id);
+      setEditPortion(1);
+      setEditItems(parseLogItems(log.items));
+      setEditMealType(log.mealType);
       setEditNote(log.note?.trim() ?? summarizeFoodFromLog(log));
       setEditCalories(String(Number(log.calories ?? 0)));
       setEditProtein(String(Number(log.proteinGram ?? 0)));
@@ -2590,6 +2567,7 @@ function DashboardScreen({
 
   const deleteLogRecord = useCallback(
     async (log: FoodLog) => {
+      if (log.id.startsWith('pending-')) { Alert.alert('待同步', '保存结果尚未确认，请同步后再删除，避免云端保留未删除记录。'); return; }
       try {
         await apiRequest(
           `/api/logs/${log.id}`,
@@ -2638,6 +2616,7 @@ function DashboardScreen({
   );
 
   const openEditExerciseModal = useCallback((exercise: ExerciseLog) => {
+    if (exercise.id.startsWith('pending-')) { Alert.alert('待同步', '请先同步这条记录，再编辑。'); return; }
     const nextIntensity: ExerciseIntensity =
       exercise.intensity === 'LOW' || exercise.intensity === 'HIGH' || exercise.intensity === 'MODERATE'
         ? exercise.intensity
@@ -2660,6 +2639,7 @@ function DashboardScreen({
 
   const deleteExerciseRecord = useCallback(
     async (exercise: ExerciseLog) => {
+      if (exercise.id.startsWith('pending-')) { Alert.alert('待同步', '请先同步这条记录，再删除。'); return; }
       try {
         await apiRequest(
           `/api/exercises/${exercise.id}`,
@@ -2747,7 +2727,7 @@ function DashboardScreen({
           method: 'PUT',
           body: JSON.stringify({
             loggedAt: nextLoggedAt,
-            mealType: targetLog.mealType,
+            mealType: editMealType,
             source: targetLog.source,
             visibility: editVisibility,
             imageUri: targetLog.imageUri ?? undefined,
@@ -2757,10 +2737,10 @@ function DashboardScreen({
             carbsGram: Number(toNumberOr(editCarbs, Number(targetLog.carbsGram ?? 0)).toFixed(1)),
             fatGram: Number(toNumberOr(editFat, Number(targetLog.fatGram ?? 0)).toFixed(1)),
             fiberGram: Number(toNumberOr(editFiber, Number(targetLog.fiberGram ?? 0)).toFixed(1)),
-            sugarGram: Number(targetLog.sugarGram ?? targetLog.nutrients?.sugarGram ?? 0),
-            sodiumMg: Number(targetLog.sodiumMg ?? targetLog.nutrients?.sodiumMg ?? 0),
-            nutrients: targetLog.nutrients ?? undefined,
-            items: targetLog.items,
+            sugarGram: Number(targetLog.sugarGram ?? targetLog.nutrients?.sugarGram ?? 0) * editPortion,
+            sodiumMg: Number(targetLog.sodiumMg ?? targetLog.nutrients?.sodiumMg ?? 0) * editPortion,
+            nutrients: targetLog.nutrients ? scaleNutrients(targetLog.nutrients, editPortion) : undefined,
+            items: editItems,
             aiProvider: targetLog.aiProvider ?? undefined,
             aiModel: targetLog.aiModel ?? undefined,
             aiRoute: targetLog.aiRoute ?? undefined,
@@ -2788,6 +2768,9 @@ function DashboardScreen({
     }
   }, [
     editCalories,
+    editPortion,
+    editItems,
+    editMealType,
     editCarbs,
     editDate,
     editFat,
@@ -2899,6 +2882,9 @@ function DashboardScreen({
   ]);
 
   const sendConversationMessage = useCallback(async () => {
+    if (!draftReady || conversationLoading) return;
+    try { await writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate }); }
+    catch { Alert.alert('草稿未保存', '本地存储失败，请检查剩余空间后重试'); return; }
     const currentInput = conversationInput.trim();
     const hasImage = Boolean(conversationImageBase64);
 
@@ -2931,32 +2917,7 @@ function DashboardScreen({
           ...aiUsageFromAnalysis(analysis),
         };
 
-        const saveState = await persistWithAmbiguousRecovery<{ exercise: ExerciseLog }>(
-          '/api/exercises',
-          requestBody,
-          token,
-          async () => {
-            const verification = await apiRequest<{
-              exercises: ExerciseLog[];
-              summary: { calories: number; durationMin: number };
-            }>(`/api/exercises?date=${selectedDate}`, {}, token);
-            const confirmed = verification.exercises.some(
-              (item) =>
-                item.clientRequestId === clientRequestId ||
-                (item.source === 'AI' &&
-                  isSameLoggedMoment(item.loggedAt, loggedAt) &&
-                  item.exerciseType === analysis.exerciseType &&
-                  isNearlyEqual(item.durationMin, analysis.durationMin) &&
-                  isNearlyEqual(item.calories, analysis.calories) &&
-                  (item.note ?? '') === note),
-            );
-            if (confirmed) {
-              setExercises(verification.exercises);
-              setExerciseSummary(verification.summary);
-            }
-            return confirmed;
-          },
-        );
+        const saveState = await persistWithAmbiguousRecovery('/api/exercises', requestBody, token);
 
         if (saveState === 'pending') {
           const optimisticExercise: ExerciseLog = {
@@ -2980,6 +2941,7 @@ function DashboardScreen({
           }));
         }
 
+        await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
         setConversationInput('');
         clearConversationImage();
         await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
@@ -3151,7 +3113,7 @@ function DashboardScreen({
         mealType,
         source: 'AI' as const,
         visibility: conversationVisibility,
-        imageUri: conversationImageUri ?? undefined,
+        imageUri: conversationImageBase64 ? `data:${conversationImageMimeType};base64,${conversationImageBase64}` : undefined,
         note,
         calories: normalized.calories,
         proteinGram: normalized.proteinGram,
@@ -3165,33 +3127,7 @@ function DashboardScreen({
         ...aiUsageFromAnalysis(analysis),
       };
 
-      const saveState = await persistWithAmbiguousRecovery<{ log: FoodLog }>(
-        '/api/logs',
-        requestBody,
-        token,
-        async () => {
-          const verification = await apiRequest<{
-            logs: FoodLog[];
-            summary: { calories: number; proteinGram: number; carbsGram: number; fatGram: number; fiberGram: number };
-          }>(`/api/logs?date=${selectedDate}`, {}, token);
-          const confirmed = verification.logs.some(
-            (item) =>
-              item.clientRequestId === clientRequestId ||
-              (item.source === 'AI' &&
-                isSameLoggedMoment(item.loggedAt, loggedAt) &&
-                (item.note ?? '') === note &&
-                isNearlyEqual(item.calories, normalized.calories) &&
-                isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
-                isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
-                isNearlyEqual(item.fatGram, normalized.fatGram)),
-          );
-          if (confirmed) {
-            setLogs(verification.logs);
-            setSummary(verification.summary);
-          }
-          return confirmed;
-        },
-      );
+      const saveState = await persistWithAmbiguousRecovery('/api/logs', requestBody, token);
 
       if (saveState === 'pending') {
         const optimisticLog: FoodLog = {
@@ -3224,6 +3160,7 @@ function DashboardScreen({
         }));
       }
 
+      await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
       setConversationInput('');
       clearConversationImage();
       await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
@@ -3263,6 +3200,14 @@ function DashboardScreen({
   useEffect(() => {
     void loadCalendar();
   }, [loadCalendar]);
+
+  useEffect(() => {
+    const sync = () => { void syncPendingWrites(token).then(() => load({ silent: true })).catch(() => setSyncMessage('暂未同步，将在网络恢复后继续')); };
+    sync();
+    const timer = setInterval(sync, 30000);
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') sync(); });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, [token, load]);
 
   useEffect(() => {
     setSelectedMonth(toMonthString(selectedDate));
@@ -3349,7 +3294,7 @@ function DashboardScreen({
   }, [calorieProgress, calorieTargetForChart, exerciseSummary.calories, journalTheme.calorie, journalTheme.chartTrack, journalTheme.danger, journalTheme.exercise, remainCalories]);
 
   const calorieCenterValue = remainCalories === null ? netCalories : remainCalories;
-  const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : "剩余 kcal";
+  const calorieCenterLabel = remainCalories === null ? "净摄入 kcal" : remainCalories < 0 ? "超出 kcal" : "剩余 kcal";
 
   const sortedLogs = useMemo(() => {
     return [...logs].sort((a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime());
@@ -3363,9 +3308,8 @@ function DashboardScreen({
       loggedAt: exercise.loggedAt,
       exercise,
     }));
-    return [...foodEntries, ...exerciseEntries].sort(
-      (a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime(),
-    );
+    const order = (entry: typeof foodEntries[number] | typeof exerciseEntries[number]) => entry.kind === 'exercise' ? 4 : ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'].indexOf(entry.log.mealType);
+    return [...foodEntries, ...exerciseEntries].sort((a, b) => order(a) - order(b) || new Date(a.loggedAt).getTime() - new Date(b.loggedAt).getTime());
   }, [exercises, logs]);
 
   const detailLog = useMemo(
@@ -3601,10 +3545,23 @@ function DashboardScreen({
             <Text style={[styles.journalDateArrow, themedJournal.mutedText]}>{calendarExpanded ? '▲' : '▼'}</Text>
           </Pressable>
           <Text style={[styles.journalRemainText, themedJournal.softText]}>{formatSignedKcalChange(calorieChangeFromPreviousDay)}</Text>
-          <Pressable style={[styles.journalThemeToggle, themedJournal.surface]} onPress={toggleJournalTheme}>
-            <Text style={[styles.journalThemeToggleIcon, themedJournal.text]}>{journalThemeMode === "night" ? "☾" : "☀"}</Text>
+          <Pressable accessibilityLabel='切换日夜主题' hitSlop={8} style={[styles.journalThemeToggle, themedJournal.surface]} onPress={toggleJournalTheme}>
+            <Ionicons name={journalThemeMode === 'night' ? 'moon-outline' : 'sunny-outline'} size={19} color={journalTheme.text} />
+          </Pressable>
+          <Pressable accessibilityLabel='设置' hitSlop={8} style={[styles.journalThemeToggle, themedJournal.surface]} onPress={onOpenSettings}>
+            <Ionicons name='settings-outline' size={19} color={journalTheme.text} />
           </Pressable>
         </View>
+
+        {(waiting.length > 0 || syncMessage) && <Pressable accessibilityLabel='重试同步' onPress={() => {
+          setSyncMessage('正在同步…');
+          void updatePending(token, entries => entries.map(entry => ({ ...entry, error: undefined })))
+            .then(() => syncPendingWrites(token)).then(() => load({ silent: true })).then(() => setSyncMessage('')).catch(() => setSyncMessage('暂未连接，记录已留在本地'));
+        }} style={{ paddingVertical: 6, flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          <Ionicons name='cloud-upload-outline' size={16} color={journalTheme.accent} />
+          <Text style={[styles.hint, themed.hint, { flex: 1 }]}>{waiting.length ? `${waiting.length} 条待同步${waiting.find(entry => entry.error)?.error ? `：${waiting.find(entry => entry.error)!.error}` : ''}` : syncMessage}</Text>
+          <Ionicons name='refresh-outline' size={16} color={journalTheme.accent} />
+        </Pressable>}
 
         {calendarExpanded ? (
           <View style={[styles.journalCalendarCard, themedJournal.surface]}>
@@ -3692,7 +3649,7 @@ function DashboardScreen({
                     adjustsFontSizeToFit
                     minimumFontScale={0.65}
                   >
-                    {Math.round(calorieCenterValue)}
+                    {Math.abs(Math.round(calorieCenterValue))}
                   </Text>
                   <Text
                     style={[styles.journalCalorieLabel, themedJournal.mutedText]}
@@ -3703,12 +3660,6 @@ function DashboardScreen({
                     {calorieCenterLabel}
                   </Text>
                 </View>
-              </View>
-              <View style={styles.journalRingLegendColumn}>
-                <Text style={[styles.journalRingLegendText, themedJournal.softText]}>摄入 {Math.round(summary.calories)}</Text>
-                <Text style={[styles.journalRingLegendText, { color: journalTheme.exercise }]}>
-                  运动 -{Math.round(exerciseSummary.calories)}
-                </Text>
               </View>
             </View>
 
@@ -3750,6 +3701,11 @@ function DashboardScreen({
           </View>
         </View>
 
+        {!!favorites.length && <ScrollView horizontal style={{ maxHeight: 42 }} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+          {favorites.map(log => <Pressable key={log.id} style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => { setConversationInput(summarizeFoodFromLog(log)); }} onLongPress={() => {
+            const next = favorites.filter(item => item.id !== log.id); setFavorites(next); void writeCache(token, 'favorites', next).catch(() => setSyncMessage('常用餐食保存失败'));
+          }}><Text style={[styles.hint, themed.hint]}>{summarizeFoodFromLog(log)}</Text></Pressable>)}
+        </ScrollView>}
         <ScrollView style={[styles.journalChatList, themedJournal.surfaceAlt]} contentContainerStyle={styles.journalChatListContent}>
           {loading ? <ActivityIndicator size='large' color={journalTheme.accent} /> : null}
 
@@ -3773,6 +3729,7 @@ function DashboardScreen({
                     }}
                   >
                     <View style={styles.journalEntryTextWrap}>
+                      <Text style={[styles.hint, themed.hint]}>{exercise.id.startsWith('pending-') ? '运动 · 待同步' : '运动 · 已保存'}</Text>
                       <Text style={[styles.journalEntryTitle, themedJournal.text]}>运动：{exercise.exerciseType}</Text>
                       {exercise.note ? <Text style={[styles.journalEntryNote, themedJournal.mutedText]}>{exercise.note}</Text> : null}
                     </View>
@@ -3812,6 +3769,7 @@ function DashboardScreen({
                     {log.imageUri ? <Image source={{ uri: log.imageUri }} style={styles.journalEntryImage} /> : null}
                     <View style={styles.journalEntryTextWrap}>
                       <Text style={[styles.journalEntryTitle, themedJournal.text]}>{summarizeFoodFromLog(log)}</Text>
+                      <Text style={[styles.hint, themed.hint]}>{formatMealType(log.mealType)} · {log.id.startsWith('pending-') ? '待同步' : '已保存'} · {log.aiProvider === 'local' || /本地估算|图片未成功解析/.test(log.note ?? '') ? '本地估算，待确认' : log.source === 'AI' ? 'AI 估算' : '手动记录'}</Text>
                       {log.note ? <Text style={[styles.journalEntryNote, themedJournal.mutedText]}>{log.note}</Text> : null}
                     </View>
                   </View>
@@ -3838,6 +3796,19 @@ function DashboardScreen({
                 <View style={styles.journalEntryFooter}>
                   <Text style={[styles.journalEntryTime, themedJournal.mutedText]}>{formatClockTime(log.loggedAt)}</Text>
                   <View style={styles.journalEntryActions}>
+                    <Pressable accessibilityLabel={favorites.some(item => item.id === log.id) ? '取消常用餐食' : '收藏为常用餐食'} style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => {
+                      const next = favorites.some(item => item.id === log.id) ? favorites.filter(item => item.id !== log.id) : [...favorites, log].slice(-20);
+                      setFavorites(next); void writeCache(token, 'favorites', next).catch(() => setSyncMessage('常用餐食保存失败'));
+                    }}><Ionicons name={favorites.some(item => item.id === log.id) ? 'star' : 'star-outline'} size={16} color={journalTheme.accent} /></Pressable>
+                    <Pressable accessibilityLabel='再记一次' disabled={conversationLoading || log.id.startsWith('pending-')} style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => {
+                      Alert.alert('再记一次', `将这份餐食记录到 ${selectedDate}，份量沿用原记录。`, [{ text: '取消', style: 'cancel' }, { text: '确认记录', onPress: () => {
+                        setConversationLoading(true);
+                        const { id, clientRequestId, ...data } = log;
+                        const cleaned = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== null && value !== undefined));
+                        void persistWithAmbiguousRecovery('/api/logs', { ...cleaned, loggedAt: buildLoggedAtForSelectedDate(selectedDate), clientRequestId: createConversationMessageId() }, token)
+                          .then(() => load({ silent: true })).catch(error => Alert.alert('未能记录', normalizeErrorMessage(error))).finally(() => setConversationLoading(false));
+                      } }]);
+                    }}><Ionicons name='copy-outline' size={16} color={journalTheme.accent} /></Pressable>
                     <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openEditLogModal(log)}>
                       <Text style={[styles.journalEntryActionText, themedJournal.text]}>编辑</Text>
                     </Pressable>
@@ -3910,7 +3881,31 @@ function DashboardScreen({
             ]}
           >
             <View style={[styles.journalEditModalCard, themedJournal.surface]}>
+              <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={{ gap: 10 }}>
               <Text style={[styles.journalEditModalTitle, themedJournal.text]}>编辑记录</Text>
+              <OptionRow label='餐次' options={mealOptions} value={editMealType} onChange={setEditMealType} />
+              <OptionRow label='份量' options={[{ label: '半份', value: '0.5' }, { label: '一份', value: '1' }, { label: '两份', value: '2' }]} value={String(editPortion)} onChange={value => {
+                const log = logs.find(item => item.id === editLogId);
+                if (!log) return;
+                const factor = Number(value);
+                const scaled = scaleNutrients(log, factor);
+                setEditPortion(factor); setEditItems(parseLogItems(scaled.items));
+                setEditCalories(String(scaled.calories)); setEditProtein(String(scaled.proteinGram)); setEditCarbs(String(scaled.carbsGram)); setEditFat(String(scaled.fatGram)); setEditFiber(String(scaled.fiberGram ?? 0));
+              }} />
+              {editItems.map((item, index) => <View key={index} style={{ gap: 4 }}>
+                <TextInput accessibilityLabel={`食物${index + 1}名称`} style={[styles.input, themed.input]} value={item.name} onChangeText={name => setEditItems(current => current.map((row, i) => i === index ? { ...row, name } : row))} />
+                <Text style={[styles.hint, themed.hint]}>份量（克）</Text>
+                <TextInput accessibilityLabel={`食物${index + 1}克数`} keyboardType='decimal-pad' style={[styles.input, themed.input]} value={String(item.estimatedWeightGram ?? '')} onChangeText={raw => {
+                  const grams = Number(raw);
+                  if (!Number.isFinite(grams) || grams < 0) return;
+                  const original = parseLogItems(logs.find(row => row.id === editLogId)?.items)[index];
+                  if (!original?.estimatedWeightGram) return;
+                  const next = editItems.map((row, i) => i === index ? { ...scaleNutrients(original, grams / original.estimatedWeightGram!), name: item.name } : row);
+                  setEditItems(next);
+                  const sum = (key: 'calories' | 'proteinGram' | 'carbsGram' | 'fatGram') => String(Math.round(next.reduce((total, row) => total + Number(row[key] ?? 0), 0) * 10) / 10);
+                  setEditCalories(sum('calories')); setEditProtein(sum('proteinGram')); setEditCarbs(sum('carbsGram')); setEditFat(sum('fatGram'));
+                }} />
+              </View>)}
 
               <TextInput
                 style={[styles.input, styles.journalEditInput, themedJournal.input]}
@@ -3939,11 +3934,13 @@ function DashboardScreen({
               </View>
 
               <View style={styles.journalEditGrid}>
-                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editCalories} onChangeText={setEditCalories} keyboardType='decimal-pad' placeholder='热量(千卡)' placeholderTextColor={journalTheme.placeholder} />
-                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editProtein} onChangeText={setEditProtein} keyboardType='decimal-pad' placeholder='蛋白质(g)' placeholderTextColor={journalTheme.placeholder} />
-                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editCarbs} onChangeText={setEditCarbs} keyboardType='decimal-pad' placeholder='碳水(g)' placeholderTextColor={journalTheme.placeholder} />
-                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editFat} onChangeText={setEditFat} keyboardType='decimal-pad' placeholder='脂肪(g)' placeholderTextColor={journalTheme.placeholder} />
-                <TextInput style={[styles.input, styles.journalEditInput, themedJournal.input]} value={editFiber} onChangeText={setEditFiber} keyboardType='decimal-pad' placeholder='纤维(g)' placeholderTextColor={journalTheme.placeholder} />
+                {[
+                  { label: '热量(千卡)', value: editCalories, update: setEditCalories },
+                  { label: '蛋白质(g)', value: editProtein, update: setEditProtein },
+                  { label: '碳水(g)', value: editCarbs, update: setEditCarbs },
+                  { label: '脂肪(g)', value: editFat, update: setEditFat },
+                  { label: '纤维(g)', value: editFiber, update: setEditFiber },
+                ].map(field => <View key={field.label} style={{ width: '47%', gap: 4 }}><Text style={[styles.hint, themed.hint]}>{field.label}</Text><TextInput accessibilityLabel={field.label} style={[styles.input, themed.input]} value={field.value} onChangeText={field.update} keyboardType='decimal-pad' /></View>)}
               </View>
 
               <OptionRow label='可见范围' options={visibilityOptions} value={editVisibility} onChange={setEditVisibility} />
@@ -3956,6 +3953,7 @@ function DashboardScreen({
                   <Text style={styles.primaryButtonText}>{savingEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -4216,26 +4214,8 @@ function AnalyzeScreen({ token, onSaved }: { token: string; onSaved: () => void 
 
     setLoading(true);
     try {
-      await persistWithAmbiguousRecovery<{ log: FoodLog }>(
-        "/api/logs",
-        requestBody,
-        token,
-        async () => {
-          const verification = await apiRequest<{ logs: FoodLog[] }>(`/api/logs?date=${todayDateString()}`, {}, token);
-          return verification.logs.some(
-            (item) =>
-              item.clientRequestId === clientRequestId ||
-              (item.source === "AI" &&
-                isSameLoggedMoment(item.loggedAt, loggedAt) &&
-                (item.note ?? "") === (mergedNote ?? "") &&
-                isNearlyEqual(item.calories, normalized.calories) &&
-                isNearlyEqual(item.proteinGram, normalized.proteinGram) &&
-                isNearlyEqual(item.carbsGram, normalized.carbsGram) &&
-                isNearlyEqual(item.fatGram, normalized.fatGram)),
-          );
-        },
-      );
-      Alert.alert("保存成功", "智能识别结果已保存为饮食记录。");
+      const state = await persistWithAmbiguousRecovery('/api/logs', requestBody, token);
+      Alert.alert(state === 'saved' ? '保存成功' : '待同步', state === 'saved' ? '智能识别结果已保存为饮食记录。' : '记录已保留在本机，将继续同步。');
       onSaved();
     } catch (error) {
       Alert.alert("保存失败", normalizeErrorMessage(error));
@@ -4510,6 +4490,7 @@ function WeightTrackerScreen({ token }: { token: string }) {
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [trendDays, setTrendDays] = useState(7);
 
   const loadWeights = useCallback(async () => {
     setLoading(true);
@@ -4576,9 +4557,9 @@ function WeightTrackerScreen({ token }: { token: string }) {
     }
   }, [date, loadWeights, note, token, weight]);
 
-  const ordered = useMemo(() => [...logs].reverse(), [logs]);
-  const minWeight = useMemo(() => Math.min(...ordered.map((item) => item.weightKg), Number(weight) || 0), [ordered, weight]);
-  const maxWeight = useMemo(() => Math.max(...ordered.map((item) => item.weightKg), Number(weight) || 0), [ordered, weight]);
+  const ordered = useMemo(() => { const start = new Date(); start.setDate(start.getDate() - trendDays + 1); start.setHours(0, 0, 0, 0); return [...logs].filter(log => new Date(log.loggedAt) >= start).reverse(); }, [logs, trendDays]);
+  const minWeight = useMemo(() => ordered.length ? Math.min(...ordered.map((item) => item.weightKg)) : 0, [ordered]);
+  const maxWeight = useMemo(() => ordered.length ? Math.max(...ordered.map((item) => item.weightKg)) : 0, [ordered]);
   const latest = logs[0] ?? null;
   const first = logs.length > 0 ? logs[logs.length - 1] : null;
   const change = latest && first ? Number((latest.weightKg - first.weightKg).toFixed(1)) : 0;
@@ -4586,7 +4567,8 @@ function WeightTrackerScreen({ token }: { token: string }) {
   return (
     <SafeAreaView style={[styles.safe, themed.safe]}>
       <ScrollView contentContainerStyle={styles.screenContainer}>
-        <Text style={[styles.screenTitle, themed.screenTitle]}>体重追踪</Text>
+        <Text style={[styles.screenTitle, themed.screenTitle]}>趋势与体重</Text>
+        <TrendSummary token={token} request={apiRequest} theme={theme} days={trendDays} onDaysChange={setTrendDays} />
 
         <View style={[styles.card, themed.card]}>
           <Text style={[styles.cardTitle, themed.cardTitle]}>新增体重</Text>
@@ -4612,7 +4594,8 @@ function WeightTrackerScreen({ token }: { token: string }) {
         </View>
 
         <View style={[styles.card, themed.card]}>
-          <Text style={[styles.cardTitle, themed.cardTitle]}>趋势</Text>
+          <Text style={[styles.cardTitle, themed.cardTitle]}>近 {trendDays} 天体重</Text>
+          {!ordered.length && <Text style={[styles.hint, themed.hint]}>这个时段暂无体重记录</Text>}
           {loading ? <ActivityIndicator size="small" color={theme.accent} /> : null}
           {latest ? (
             <>
@@ -5745,6 +5728,9 @@ function SocialNavigator({ token, user, onLogout }: { token: string; user: AuthU
 }
 
 function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void }) {
+  bindStorageSession(auth.token, runtimeApiBaseUrl, auth.user.id);
+  const insets = useSafeAreaInsets();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [journalThemeMode, setJournalThemeMode] = useState<JournalThemeMode>("night");
   const [journalThemeLoaded, setJournalThemeLoaded] = useState(false);
   const journalTheme = journalThemeTokens[journalThemeMode];
@@ -5785,23 +5771,24 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
           screenOptions={({ route }) => ({
             headerShown: false,
             tabBarIcon: ({ color, focused }) => (
-              <Text style={[styles.tabBarIcon, { color, fontSize: focused ? 20 : 18 }]}>{tabIconMap[route.name] ?? "•"}</Text>
+              <Ionicons name={tabIconMap[route.name] ?? 'ellipse-outline'} size={22} color={color} />
             ),
             tabBarStyle: {
-              height: 54,
+              height: 60 + insets.bottom,
               backgroundColor: journalTheme.tabBar,
               borderTopColor: journalTheme.tabBorder,
-              paddingTop: 3,
-              paddingBottom: 4,
+              paddingTop: 6,
+              paddingBottom: Math.max(insets.bottom, 4),
             },
             tabBarItemStyle: styles.tabBarItem,
             tabBarIconStyle: styles.tabBarIconWrap,
             tabBarActiveTintColor: journalTheme.accent,
             tabBarInactiveTintColor: journalTheme.textMuted,
             tabBarLabelStyle: {
-              fontSize: 10,
-              fontWeight: "700",
-              marginTop: -2,
+              fontSize: 11,
+              lineHeight: 15,
+              fontWeight: "600",
+              marginTop: 2,
             },
           })}
         >
@@ -5812,6 +5799,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
                 onAuthInvalid={onLogout}
                 journalThemeMode={journalThemeMode}
                 onJournalThemeModeChange={setJournalThemeMode}
+                onOpenSettings={() => setSettingsOpen(true)}
               />
             )}
           </Tab.Screen>
@@ -5821,11 +5809,14 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
         </Tab.Navigator>
         <StatusBar style={journalTheme.statusBar} />
       </NavigationContainer>
+      {settingsOpen && <SettingsPanel token={auth.token} email={auth.user.email} request={rawApiRequest} theme={journalTheme} onClose={() => setSettingsOpen(false)} onLogout={onLogout} mode={journalThemeMode} onModeChange={setJournalThemeMode} />}
     </JournalThemeContext.Provider>
   );
 }
 
-export default function App() {
+export default function App() { return <SafeAreaProvider><AppContent /></SafeAreaProvider>; }
+
+function AppContent() {
   const [booting, setBooting] = useState(true);
   const [auth, setAuth] = useState<AuthPayload | null>(null);
   const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
@@ -5919,10 +5910,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tabBarItem: {
-    paddingVertical: 2,
+    paddingVertical: 0,
   },
   tabBarIconWrap: {
-    marginTop: 1,
+    width: 24,
+    height: 24,
+    flex: 0,
+    marginTop: 0,
   },
   tabBarIcon: {
     fontWeight: "800",
@@ -6110,8 +6104,9 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#101c31",
     borderColor: "#243146",
-    borderWidth: 1,
-    borderRadius: 14,
+    borderWidth: 0,
+    borderTopWidth: 1,
+    borderRadius: 0,
     padding: 12,
   },
   highlightCard: {
@@ -6504,7 +6499,7 @@ const styles = StyleSheet.create({
   },
   journalChartCard: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 8,
     padding: 10,
     gap: 8,
   },
@@ -6662,14 +6657,14 @@ const styles = StyleSheet.create({
   },
   journalChatList: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: 0,
     borderColor: "#243146",
-    borderRadius: 12,
+    borderRadius: 0,
     backgroundColor: "#0d182a",
   },
   journalChatListContent: {
-    padding: 8,
-    gap: 6,
+    paddingVertical: 8,
+    gap: 8,
   },
   journalEmptyCard: {
     borderWidth: 1,
@@ -6692,7 +6687,7 @@ const styles = StyleSheet.create({
   journalEntryCard: {
     borderWidth: 1,
     borderColor: "#283752",
-    borderRadius: 12,
+    borderRadius: 8,
     backgroundColor: "#10203a",
     padding: 10,
     gap: 8,
@@ -6862,9 +6857,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   journalEditModalCard: {
+    maxHeight: '90%',
     borderWidth: 1,
     borderColor: "#2a3a55",
-    borderRadius: 14,
+    borderRadius: 8,
     backgroundColor: "#0f1c32",
     padding: 12,
     gap: 10,

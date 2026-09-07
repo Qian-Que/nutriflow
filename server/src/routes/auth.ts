@@ -113,6 +113,10 @@ authRouter.post("/login", async (req, res) => {
 });
 
 authRouter.post("/forgot-password/request", async (req, res) => {
+  if (process.env.ALLOW_DEMO_PASSWORD_RESET !== "true" || process.env.NODE_ENV === "production" || process.env.RAILWAY_ENVIRONMENT_ID) {
+    res.status(503).json({ message: "暂未启用邮箱验证码服务，请联系管理员找回密码" });
+    return;
+  }
   const parsed = forgotPasswordRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ message: parsed.error.issues[0]?.message ?? "参数不合法" });
@@ -145,6 +149,10 @@ authRouter.post("/forgot-password/request", async (req, res) => {
 });
 
 authRouter.post("/forgot-password/confirm", async (req, res) => {
+  if (process.env.ALLOW_DEMO_PASSWORD_RESET !== "true" || process.env.NODE_ENV === "production" || process.env.RAILWAY_ENVIRONMENT_ID) {
+    res.status(503).json({ message: "暂未启用邮箱验证码服务，请联系管理员找回密码" });
+    return;
+  }
   const parsed = forgotPasswordConfirmSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ message: parsed.error.issues[0]?.message ?? "参数不合法" });
