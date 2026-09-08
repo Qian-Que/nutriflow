@@ -56,7 +56,10 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
         if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: '导出我的记录' });
         else throw new Error('当前设备不支持文件分享');
       } else if (kind === 'test') {
-        const result = await request<{ elapsedMs: number }>('/api/admin/ai-settings/test', { method: 'POST', body: JSON.stringify(payload()) }, token, { timeoutMs: 60000 });
+        const draft = payload();
+        // Compatibility mode may try Responses followed by Chat Completions.
+        const timeoutMs = Math.max(60000, draft.aiTimeoutMs * 2 + 15000);
+        const result = await request<{ elapsedMs: number }>('/api/admin/ai-settings/test', { method: 'POST', body: JSON.stringify(draft) }, token, { timeoutMs });
         setMessage(`主线路测试通过，用时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；尚未发布`);
       } else {
         const data = await request<Settings>('/api/admin/ai-settings', { method: kind === 'save' ? 'PUT' : 'DELETE', ...(kind === 'save' ? { body: JSON.stringify(payload()) } : {}) }, token);

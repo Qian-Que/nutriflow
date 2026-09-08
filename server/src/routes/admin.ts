@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
-import { getAIConfig, isAdmin, publicAISettings, resetAISettings, saveAISettings, withPreviewSettings } from "../lib/aiSettings";
-import { analyzeFoodText } from "../services/aiNutrition";
+import { getAIConfig, isAdmin, publicAISettings, resetAISettings, saveAISettings } from "../lib/aiSettings";
+import { describeAITestFailure, testPrimaryAI } from "../services/aiSettingsTest";
 
 const provider = z.enum(["openai", "openai_compat_auto", "openai_compat_responses", "openai_compat_chat", "gemini"]);
 const endpoint = z.string().max(500).refine(value => {
@@ -35,11 +35,8 @@ adminRouter.post("/ai-settings/test", async (req, res) => {
   const settings = resolveSettings(parsed.data);
   if (!settings.aiApiKey) { res.status(400).json({ message: "请填写主线路 API 密钥" }); return; }
   try {
-    const start = Date.now();
-    // Preview is request-local and cannot affect other users or publish a draft.
-    const result = await withPreviewSettings({ ...settings, aiBackupBaseUrl: "", aiBackupModel: "", aiBackupApiKey: "", aiTimeoutMs: Math.min(settings.aiTimeoutMs, 20000) }, () => analyzeFoodText("一杯250毫升纯牛奶"));
-    res.json({ ok: true, model: result.ai?.model, elapsedMs: Date.now() - start });
-  } catch { res.status(502).json({ message: "测试失败，请检查接口地址、密钥、模型名称或稍后重试。当前线上配置未改变。" }); }
+    res.json(await testPrimaryAI(settings));
+  } catch (error) { res.status(502).json(describeAITestFailure(error, settings.aiTimeoutMs)); }
 });
 adminRouter.put("/ai-settings", (req, res) => {
   const parsed = settingsSchema.safeParse(req.body);
