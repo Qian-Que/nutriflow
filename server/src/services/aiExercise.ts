@@ -1,6 +1,7 @@
 import { config } from "../config";
 
 import { getAIConfig } from "../lib/aiSettings";
+import { GEMINI_MAX_OUTPUT_TOKENS, GeminiResponseError, extractGeminiText, parseGeminiResponseBody } from "./geminiResponse";
 
 export type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
 
@@ -219,7 +220,7 @@ function parseJsonOrStreamPayload(text: string) {
   throw new Error(`AI response is not valid JSON: ${raw.slice(0, 200)}`);
 }
 
-async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number, gemini = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const safeUrl = maskSensitiveUrl(url);
@@ -229,8 +230,10 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
       const text = await response.text();
       throw new Error(`AI API request failed (${response.status}): ${text}`);
     }
-    return parseJsonOrStreamPayload(await response.text());
+    const body = await response.text();
+    return gemini ? parseGeminiResponseBody(body) : parseJsonOrStreamPayload(body);
   } catch (error) {
+    if (error instanceof GeminiResponseError) throw error;
     if ((error as Error).name === "AbortError") {
       throw new Error(`AI request timeout (>${timeoutMs}ms): ${safeUrl}`);
     }
@@ -273,14 +276,6 @@ function extractText(response: any) {
     return content.map((item) => item?.text ?? item?.content ?? "").join("\n");
   }
   return "";
-}
-
-function extractGeminiText(response: any) {
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) {
-    return "";
-  }
-  return parts.map((part) => (typeof part?.text === "string" ? part.text : "")).filter(Boolean).join("\n");
 }
 
 function buildGeminiGenerateContentUrl(baseUrl: string, model: string, apiKey: string) {
@@ -427,12 +422,13 @@ async function callGemini(client: AIClientConfig, prompt: string, image?: { base
         contents: [{ role: "user", parts }],
         generationConfig: {
           temperature: 0.15,
-          maxOutputTokens: 700,
+          maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
           responseMimeType: "application/json",
         },
       }),
     },
     client.timeoutMs,
+    true,
   );
   return extractGeminiText(payload);
 }

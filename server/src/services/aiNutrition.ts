@@ -1,6 +1,7 @@
 ﻿import { config } from "../config";
 
 import { getAIConfig } from "../lib/aiSettings";
+import { GEMINI_MAX_OUTPUT_TOKENS, GeminiResponseError, extractGeminiText, parseGeminiResponseBody } from "./geminiResponse";
 
 export type NutritionItem = {
   name: string;
@@ -496,7 +497,7 @@ function parseJsonOrStreamPayload(text: string) {
   throw new Error(`AI 返回内容不是有效 JSON：${raw.slice(0, 200)}`);
 }
 
-async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number, gemini = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const safeUrl = maskSensitiveUrl(url);
@@ -512,8 +513,10 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
       throw new Error(`AI 接口调用失败（${response.status}）：${errorText}`);
     }
 
-    return parseJsonOrStreamPayload(await response.text());
+    const body = await response.text();
+    return gemini ? parseGeminiResponseBody(body) : parseJsonOrStreamPayload(body);
   } catch (error) {
+    if (error instanceof GeminiResponseError) throw error;
     if ((error as Error).name === "AbortError") {
       throw new Error(`AI 请求超时（>${timeoutMs}ms）：${safeUrl}`);
     }
@@ -599,19 +602,6 @@ function extractTextOutputFromChatCompletions(response: any): string | null {
   }
 
   return null;
-}
-
-function extractTextOutputFromGemini(response: any): string | null {
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) {
-    return null;
-  }
-  const text = parts
-    .map((part) => (typeof part?.text === "string" ? part.text : ""))
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-  return text.length > 0 ? text : null;
 }
 
 function buildGeminiGenerateContentUrl(baseUrl: string, model: string, apiKey: string) {
@@ -918,20 +908,16 @@ async function callGeminiGenerateContentApi(params: {
         ],
         generationConfig: {
           temperature: 0.2,
-          maxOutputTokens: 1000,
+          maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
           responseMimeType: "application/json",
         },
       }),
     },
     timeoutMs,
+    true,
   );
 
-  const outputText = extractTextOutputFromGemini(payload);
-  if (!outputText) {
-    throw new Error("Gemini 未返回有效内容");
-  }
-
-  return outputText;
+  return extractGeminiText(payload);
 }
 
 async function callResponsesApiText(params: {

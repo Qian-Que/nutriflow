@@ -1,6 +1,7 @@
 import { config } from "../config";
 
 import { getAIConfig } from "../lib/aiSettings";
+import { GEMINI_MAX_OUTPUT_TOKENS, extractGeminiText, parseGeminiResponseBody } from "./geminiResponse";
 
 export type EntryKind = "FOOD" | "EXERCISE" | "UNKNOWN";
 
@@ -184,14 +185,6 @@ function extractJsonText(raw: string) {
   return text;
 }
 
-function extractGeminiText(payload: any) {
-  const parts = payload?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) {
-    return "";
-  }
-  return parts.map((part) => (typeof part?.text === "string" ? part.text : "")).filter(Boolean).join("\n");
-}
-
 function extractOpenAIText(payload: any) {
   const content = payload?.choices?.[0]?.message?.content;
   return typeof content === "string" ? content : "";
@@ -273,7 +266,7 @@ function parseJsonOrStreamPayload(text: string) {
   throw new Error(`AI response is not valid JSON: ${raw.slice(0, 200)}`);
 }
 
-async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number, gemini = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -282,7 +275,8 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
       const text = await response.text();
       throw new Error(`AI API request failed (${response.status}): ${text}`);
     }
-    return parseJsonOrStreamPayload(await response.text());
+    const body = await response.text();
+    return gemini ? parseGeminiResponseBody(body) : parseJsonOrStreamPayload(body);
   } catch (error) {
     if ((error as Error).name === "AbortError") {
       throw new Error(`AI request timeout (>${timeoutMs}ms)`);
@@ -313,12 +307,13 @@ async function callGemini(client: AIClientConfig, prompt: string, image?: { base
         contents: [{ role: "user", parts }],
         generationConfig: {
           temperature: 0.05,
-          maxOutputTokens: 220,
+          maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
           responseMimeType: "application/json",
         },
       }),
     },
     client.timeoutMs,
+    true,
   );
   return extractGeminiText(payload);
 }

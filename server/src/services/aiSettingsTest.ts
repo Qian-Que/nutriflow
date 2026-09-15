@@ -1,5 +1,6 @@
 import { AISettings, withPreviewSettings } from "../lib/aiSettings";
 import { analyzeFoodText } from "./aiNutrition";
+import { GeminiResponseError } from "./geminiResponse";
 
 export async function testPrimaryAI(settings: AISettings) {
   const started = Date.now();
@@ -9,9 +10,12 @@ export async function testPrimaryAI(settings: AISettings) {
 }
 
 export function describeAITestFailure(error: unknown, timeoutMs: number) {
+  if (error instanceof GeminiResponseError && !error.upstreamStatus) {
+    return { code: error.code, upstreamStatus: null, message: `测试失败：${error.message} 当前线上配置未改变。` };
+  }
   const raw = error instanceof Error ? error.message : '';
   const statusMatch = raw.match(/(?:调用失败|HTTP|status)[^\d]{0,8}(\d{3})/i);
-  const status = statusMatch ? Number(statusMatch[1]) : undefined;
+  const status = error instanceof GeminiResponseError ? error.upstreamStatus : statusMatch ? Number(statusMatch[1]) : undefined;
   let reason: string;
   let code: string;
   if (status === 401 || status === 403) {
