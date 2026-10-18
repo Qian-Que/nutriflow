@@ -2,6 +2,16 @@
 
 React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记录应用。当前版本重点是：图片/文字 AI 识别、饮食和运动自动分类、每日目标营养、体重追踪、好友动态、记录可见范围、云端后端独立使用。
 
+## 应用截图
+
+真实运行界面（Expo Web 移动尺寸，演示数据），依次为记录与营养、目标设置、趋势与体重。
+
+<p>
+  <img src="docs/screenshots/journal.png" alt="记录页：每日热量、营养摄入和饮食记录" width="260" />
+  <img src="docs/screenshots/targets.png" alt="目标设置：身体信息、活动水平和体重目标" width="260" />
+  <img src="docs/screenshots/trends.png" alt="趋势与体重：饮食回顾图表和体重记录" width="260" />
+</p>
+
 ## 当前版本与下载
 
 - Android 版本：**1.1.2**（`versionCode: 4`）。
