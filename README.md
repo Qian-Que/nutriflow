@@ -1,186 +1,240 @@
 ﻿# 饮食营养助手 NutriFlow
 
-React Native + Express + SQLite 的饮食、体重、运动记录应用。支持图片/文字 AI 识别、目标营养计算、体重追踪、运动估算、好友动态与可见范围。
+React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记录应用。当前版本重点是：图片/文字 AI 识别、饮食和运动自动分类、每日目标营养、体重追踪、好友动态、记录可见范围、云端后端独立使用。
 
-## 当前版本
+## 当前版本与下载
 
-- 移动端构建标识：`2026-05-02-r10`
-- 后端会自动迁移新增字段和表，无需手动执行 SQL。
-- 本次新增：目标体重、减重/增重效率、体重追踪图表、运动识别与记录、运动热量纳入每日剩余热量、健康分析增强。
+- Android 版本：**1.1.2**（`versionCode: 4`）。
+- 移动端构建标识：`2026-09-15-r17`，对应功能提交 `ad6d72d`。
+- [v1.1.2 发布说明](https://github.com/Qian-Que/nutrition-app/releases/tag/v1.1.2)
+- [下载 Android APK](https://github.com/Qian-Que/nutrition-app/releases/download/v1.1.2/NutriFlow-v1.1.2-android.apk)
+- 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
+- 此次发布上传已验证的 1.1.2 安装包，不改变主备 AI 配置，也不代表第三方主线路已通过实测。
 
-## 核心功能
+APK SHA-256：
 
-1. 饮食识别与记录
-- 图片识别：`POST /api/nutrition/analyze-image`
-- 文字识别：`POST /api/nutrition/analyze-text`
-- 图片可附加文字描述，提高识别准确性。
-- 记录详情包含宏量营养素、部分微量营养素和健康分析。
+```text
+874affef311e869d3ac84f03d51f2516858126220a92b0593196b243bffb5e74
+```
 
-2. 运动识别与记录
-- 发送“跑步 30 分钟”“力量训练 45 分钟”等文字后，App 会自动走运动识别。
-- 后端接口：`POST /api/exercises/analyze`
-- 运动记录接口：`GET /api/exercises`、`POST /api/exercises`、`PUT /api/exercises/:id`、`DELETE /api/exercises/:id`
-- 每日剩余热量会按 `目标热量 - 食物摄入 + 运动消耗` 计算。
+近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
 
-3. 目标营养
-- 支持年龄、身高、体重、性别、活动水平、目标类型。
-- 支持目标体重和每周体重变化速度。
-- 算法使用 Mifflin-St Jeor BMR、活动系数 TDEE、目标体重速度折算热量调整。
-- 减重速度限制为较保守的健康范围，避免过低热量目标。
+## 新窗口快速衔接
 
-4. 体重追踪
-- 新增“体重”页面。
-- 支持记录体重、日期和备注。
-- 使用简单图表展示近期变化。
-- 新体重会同步更新用户当前体重，并重新计算目标营养。
-- 后端接口：`GET /api/weights`、`POST /api/weights`、`DELETE /api/weights/:id`
+如果重新打开 Codex 或新窗口，先看这一节即可。
 
-5. 社交与可见范围
-- 记录可设置：仅自己可见、好友可见、公开。
-- 动态页用于查看好友或公开记录。
-- 好友详情可查看可见范围内的统计和日历。
+### 当前项目位置
 
-## 目录结构
+- 主仓库：`E:\AI\healthydiet`
+- 移动端源码：`E:\AI\healthydiet\mobile`
+- 后端源码：`E:\AI\healthydiet\server`
+- 当前 Android 打包目录：`E:\AI\healthydiet\mobile`；`E:\mobile_clean\mobile` 是历史镜像，不作为当前发布来源。
+- GitHub：`https://github.com/Qian-Que/nutrition-app.git`
 
-- `server`：Express + SQLite 后端
-- `mobile`：Expo React Native 源码
-- `docs`：云端部署文档
-- `E:\mobile_clean\mobile`：本机 Android 打包镜像目录，打包前需要同步最新 `mobile/App.tsx`
+### 当前线上后端
 
-## 本地开发
+- Railway 主服务：`strong-amazement`
+- Railway 公网地址：`https://strong-amazement-production-c91d.up.railway.app`
+- Railway Root Directory：`server`
+- 另一个 `nutrition-app` Railway 服务是旧/失败服务，排查时优先忽略。
 
-### 启动后端
+### 当前移动端默认配置
+
+- 默认后端地址写在 `mobile/App.tsx`：`CLOUD_DEFAULT_API_BASE_URL`
+- 当前构建标识写在 `mobile/App.tsx`：`APP_BUILD_LABEL`
+- 本地 `.env` 只影响本地启动/打包时的移动端变量；云端 AI 优先使用管理员在应用设置中保存的全局配置，没有已保存配置时才使用 Railway Variables。
+
+### 最近已完成的主要功能
+
+- 饮食记录改为卡片式输入：文字、图片、图片附加描述都走 AI 识别。
+- 运动记录支持文字和运动截图识别，后端会先分类是饮食还是运动，再走对应分析。
+- 记录卡片支持编辑、删除、详情页。
+- 详情页显示健康分析、营养/运动明细、使用的 AI 模型。
+- 目标页支持目标体重、减重/增重效率，按 Mifflin-St Jeor BMR + 活动系数估算。
+- 新增体重追踪页，支持体重记录和趋势图。
+- 动态/好友系统支持饮食和运动同时展示。
+- 记录可见范围会记忆上一次选择。
+- 后端默认长期保留数据；只有显式设置正整数 `DATA_RETENTION_DAYS` 才会清理超期数据。
+- 支持日间/夜间主题、营养图表、离线草稿、同步恢复、数据导出和管理员全局 AI 设置。
+- Gemini 响应解析支持分段内容，区分输出截断、内容拦截、空答案和协议不匹配。
+- 国内网络稳定性只做了安全优化：GET/HEAD 请求失败或 5xx 时重试一次；POST/PUT/DELETE 不自动重试，避免重复新增/删除。
+
+### 最近一次已验证
+
+在最近一次后端改动后已验证：
 
 ```powershell
 cd E:\AI\healthydiet\server
-Copy-Item .env.example .env
+npm run build
+
+cd E:\AI\healthydiet\mobile
+npx tsc --noEmit
+```
+
+1.1.2 功能提交：`ad6d72d Handle Gemini output limits and streamed response diagnostics`。该版本已通过后端构建、移动端类型检查、AI 测试/响应解析、权限与数据保留、离线同步回归检查；APK 构建和签名校验通过。第三方主线路实际可用性仍需在应用设置中测试。
+
+## 目录结构
+
+```text
+E:\AI\healthydiet
+├─ server   # Express + SQLite 后端
+├─ mobile   # Expo React Native App
+└─ docs     # Railway / Render 部署文档
+```
+
+注意：`docs` 里的部分中文文档可能有编码乱码，以本 README 为当前准确信息。
+
+## 后端本地开发
+
+```powershell
+cd E:\AI\healthydiet\server
 npm install
+Copy-Item .env.example .env
 npm run dev
 ```
 
-默认地址：`http://127.0.0.1:4000`
+默认本地地址：
 
-### 启动移动端
+```text
+http://127.0.0.1:4000
+```
+
+测试：
+
+```powershell
+curl http://127.0.0.1:4000/health
+```
+
+浏览器打开根路径 `/` 显示 `接口不存在：GET /` 是正常的，要测 `/health`。
+
+## 移动端本地开发
 
 ```powershell
 cd E:\AI\healthydiet\mobile
-Copy-Item .env.example .env
 npm install
+Copy-Item .env.example .env
 npm run start
 ```
 
-## Railway 部署后端
+手机独立使用时，登录页接口地址应填写 Railway HTTPS 地址，不要填 `127.0.0.1` 或局域网 IP。
 
-Railway 服务建议设置：
+```text
+https://strong-amazement-production-c91d.up.railway.app
+```
 
+## Railway 部署
+
+Railway 设置：
+
+- Source Repo：`Qian-Que/nutrition-app`
+- Branch：`main`
 - Root Directory：`server`
 - Start Command：`npm run start`
-- Healthcheck Path：`/health`
 - Public Networking Port：`4000`
+- Healthcheck Path：`/health`
+
+建议挂载 Volume：
+
+- Mount Path：`/data`
+- SQLite 路径变量：`SQLITE_PATH=/data/nutrition.db`
 
 必填变量：
 
 ```env
 PORT=4000
 NODE_VERSION=22
-JWT_SECRET=change-to-a-long-random-secret
+JWT_SECRET=换成足够长的随机字符串
 CORS_ORIGIN=*
 SQLITE_PATH=/data/nutrition.db
 ```
 
-AI 变量示例：
+AI 主线路变量：
 
 ```env
 AI_PROVIDER=openai_compat_auto
-AI_BASE_URL=https://你的兼容服务/v1
+AI_BASE_URL=https://你的服务商地址/v1
 AI_API_KEY=你的key
-AI_MODEL=支持图片和文字的模型
+AI_MODEL=支持文字和图片的模型
 AI_IMAGE_DETAIL=auto
-AI_TIMEOUT_MS=45000
+AI_TIMEOUT_MS=90000
 ```
 
-备用线路可选：
+AI 备用线路变量：
 
 ```env
 AI_BACKUP_PROVIDER=openai_compat_auto
-AI_BACKUP_BASE_URL=https://备用兼容服务/v1
+AI_BACKUP_BASE_URL=https://备用服务商地址/v1
 AI_BACKUP_API_KEY=备用key
 AI_BACKUP_MODEL=备用模型
 AI_BACKUP_IMAGE_DETAIL=auto
-AI_BACKUP_TIMEOUT_MS=45000
+AI_BACKUP_TIMEOUT_MS=90000
 ```
 
-部署后测试：
+Gemini 原生或 Gemini 代理注意：
+
+- Gemini 原生适配支持 `.../v1beta` 和 `.../v1beta/models` 两种地址，不要附加密钥或 `:generateContent`。
+- 如果是 OpenAI 兼容代理，才使用 `/v1` 这种地址。
+- 管理员可在应用的“设置 → 全局 AI”中修改模型、接口和密钥，保存后对所有用户的新识别请求生效，无需改源码或重新打包。“测试主线路”不会保存草稿，也不会回退到备用线路。
+- Railway Variables 是没有已保存全局配置时的默认值；已有全局配置时，仅修改环境变量不会覆盖它。可在应用中恢复服务器环境配置。本地 `server/.env` 只影响本地后端。
+- 移动端 `mobile/.env` 只影响 App 访问哪个后端，不控制云端 AI 模型。
+
+## Android 打包
+
+当前已在英文路径 `E:\AI\healthydiet\mobile` 直接完成 release 构建，无需同步到旧镜像。
+
+### 1. 准备当前源码
+
+```powershell
+cd E:\AI\healthydiet\mobile
+npm ci
+```
+
+### 2. 快速打包
+
+```powershell
+cd E:\AI\healthydiet\mobile
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-install-android.ps1 -Variant release -SkipInstall
+```
+
+如果需要构建后安装到已连接的手机：
+
+```powershell
+cd E:\AI\healthydiet\mobile
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-install-android.ps1 -Variant release
+```
+
+APK 常见输出路径：
 
 ```text
-https://你的railway域名/health
+E:\AI\healthydiet\mobile\android\app\build\outputs\apk\release\app-release.apk
+E:\AI\healthydiet\mobile\android\app\build\outputs\apk\debug\app-debug.apk
 ```
 
-浏览器打开根路径出现 `接口不存在：GET /` 是正常现象，必须访问 `/health`。
-
-## Android 本地打包
-
-推荐从英文路径镜像打包：`E:\mobile_clean\mobile`。
-
-先同步源码：
-
-```powershell
-Copy-Item "E:\AI\healthydiet\mobile\App.tsx" "E:\mobile_clean\mobile\App.tsx" -Force
-```
-
-如果需要重新生成 Android 工程，先关闭 Android Studio 和占用中的终端，再执行：
-
-```powershell
-cd E:\mobile_clean\mobile
-npx expo prebuild -p android --clean
-```
-
-Release APK 打包：
-
-```powershell
-cd E:\mobile_clean\mobile\android
-.\gradlew.bat --stop
-.\gradlew.bat clean
-.\gradlew.bat assembleRelease
-```
-
-APK 输出位置：
-
-```text
-E:\mobile_clean\mobile\android\app\build\outputs\apk\release\app-release.apk
-```
-
-安装到手机：
+### 3. 安装到手机
 
 ```powershell
 $env:Path += ";$env:LOCALAPPDATA\Android\Sdk\platform-tools"
 adb devices
-adb install -r E:\mobile_clean\mobile\android\app\build\outputs\apk\release\app-release.apk
+adb install -r E:\AI\healthydiet\mobile\android\app\build\outputs\apk\release\app-release.apk
 ```
 
-如果安装后仍是旧版，先卸载手机上的旧 App，再安装新 APK。
+如果安装后仍是旧版，先检查 APK 的版本号和安装结果，关闭并重新打开应用。不要直接卸载；卸载会删除本地未同步数据。可检查手机已安装版本：
 
-## 常见问题
+```powershell
+adb shell dumpsys package com.qianque1.nutritionassistantcn | Select-String "versionCode|versionName"
+```
 
-### App 请求超时
-
-检查顺序：
-
-1. 登录页接口地址是否是 Railway 的 `https://...up.railway.app`
-2. 浏览器能否打开 `https://你的域名/health`
-3. Railway 服务是否在线
-4. Railway AI 变量是否正确
-5. 手机是否安装了最新构建标识 `2026-05-02-r10`
+## 常见打包问题
 
 ### `SDK location not found`
 
-在 `E:\mobile_clean\mobile\android\local.properties` 写入：
+创建或修正：
 
-```properties
-sdk.dir=C:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk
+```powershell
+Set-Content -Path E:\AI\healthydiet\mobile\android\local.properties -Value "sdk.dir=C:\\Users\\13162\\AppData\\Local\\Android\\Sdk"
 ```
 
-### `adb` 命令找不到
+### `adb` 找不到
 
 ```powershell
 $env:Path += ";$env:LOCALAPPDATA\Android\Sdk\platform-tools"
@@ -189,27 +243,161 @@ adb devices
 
 ### `EBUSY ... classes.dex`
 
-关闭 Android Studio、模拟器、占用该目录的终端，然后执行：
+说明 Android Studio、Gradle、Java 或资源管理器占用了构建文件。先关闭 Android Studio、模拟器、相关终端和资源管理器预览，再执行：
 
 ```powershell
-cd E:\mobile_clean\mobile\android
-.\gradlew.bat --stop
-.\gradlew.bat clean
+taskkill /F /IM java.exe /T
+taskkill /F /IM gradle.exe /T
+taskkill /F /IM node.exe /T
+cd E:\AI\healthydiet\mobile
+npm run build:android:local
 ```
 
-### AI 识别失败
+注意：杀 `node.exe` 会停止正在运行的 Metro 或本地后端。
 
-先确认后端接口可用，再检查 Railway 变量：
+### `Unable to load script`
 
-- `AI_BASE_URL` 必须以 `/v1` 结尾，除非服务商明确不需要。
-- `AI_MODEL` 必须支持当前输入类型；图片识别必须使用支持视觉的模型。
-- 第三方兼容平台建议使用 `AI_PROVIDER=openai_compat_auto`。
-- 如果主线路不稳定，配置 `AI_BACKUP_*`。
+这是 debug APK 没有打包 JS bundle 或没有连接 Metro。要独立安装使用，打 release APK，或者用脚本的 release 构建。
 
-## 健康算法说明
+## 当前 API 功能概览
 
-- 基础代谢：Mifflin-St Jeor 公式。
-- 维护热量：BMR 乘以活动系数得到 TDEE。
-- 体重目标：按每周目标变化折算每日热量调整，并设置安全上限和最低热量保护。
-- 运动热量：使用 AI 估算运动类型、时长、强度和 MET，再按体重与时长估算消耗。
-- 所有结果只适合日常记录和估算，不等同于医生或注册营养师建议。
+认证：
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- 不安全的旧密码重置接口已禁用，不应依赖旧流程重置账号密码。
+
+饮食：
+
+- `POST /api/nutrition/analyze-text`
+- `POST /api/nutrition/analyze-image`
+- `GET /api/logs`
+- `POST /api/logs`
+- `PUT /api/logs/:id`
+- `DELETE /api/logs/:id`
+- `GET /api/logs/calendar`
+
+运动：
+
+- `POST /api/exercises/analyze`
+- `GET /api/exercises`
+- `POST /api/exercises`
+- `PUT /api/exercises/:id`
+- `DELETE /api/exercises/:id`
+
+体重：
+
+- `GET /api/weights`
+- `POST /api/weights`
+- `DELETE /api/weights/:id`
+
+目标：
+
+- `GET /api/profile/targets`
+- `POST /api/profile/targets`
+
+动态/好友：
+
+- `GET /api/feed/friends`：好友动态，包含饮食和运动。
+- `GET /api/friends/:friendId/profile`：好友详情和统计。
+- `GET /api/friends/:friendId/logs`：好友某天可见饮食和运动记录。
+- `GET /api/friends/:friendId/calendar`：好友可见日历统计，包含运动消耗。
+
+## 数据保留策略
+
+后端默认长期保留数据。只有显式将 `DATA_RETENTION_DAYS` 设置为正整数时，才按该天数清理以下超期数据；未设置或为 `0` 时不自动清理：
+
+- 饮食记录 `food_logs`
+- 运动记录 `exercise_logs`
+- 体重记录 `weight_logs`
+- 指向旧饮食记录的群组动态 `group_posts`
+
+启用保留期限后的清理触发时机：
+
+- 后端启动时执行一次。
+- 后端运行中每天执行一次。
+
+启用清理前应先备份数据库或导出记录；清理会永久删除超期数据。默认保留策略下，旧数据继续显示属于正常行为。
+
+## AI 识别策略
+
+当前后端流程：
+
+1. 先让 AI 判断输入是 `food` 还是 `exercise`。
+2. 饮食走营养估算，要求中文结果和结构化 JSON。
+3. 运动走运动类型、时长、强度、MET、消耗热量估算。
+4. 主线路失败后尝试备用线路。
+5. 详情页底部会显示本次实际使用的模型。
+
+注意事项：
+
+- 运动截图需要图片模型能看懂截图文字；如果模型不支持视觉，截图只能失败或误判。
+- 运动和食物混合输入时，模型可能误判。现在后端已加强分类提示，但仍建议一句话描述清楚，例如“这是 Keep 运动截图，请按运动记录识别”。
+- 营养微量元素是 AI 估算，不等同于真实检测值。详情页会尽量根据现有字段补齐，不应大量显示 `-`。
+
+## 网络稳定性说明
+
+国内访问 Railway、GitHub、Gemini、部分模型代理都可能不稳定。当前项目只做了安全范围内的优化：
+
+- GET/HEAD 请求出现网络错误或 5xx 时自动重试一次。
+- POST/PUT/DELETE 不自动重试，避免重复写入或重复删除。
+
+如果仍不稳定，真正有效的方案是：
+
+- 后端迁到国内云服务器。
+- 或给 Railway 后端加国内可访问的反向代理/CDN。
+- 或继续使用 Cloudflare Worker/自有域名中转 AI 模型请求。
+
+不要盲目给所有请求加重试，否则最容易造成重复记录。
+
+## 开发检查命令
+
+后端：
+
+```powershell
+cd E:\AI\healthydiet\server
+npm run build
+```
+
+移动端：
+
+```powershell
+cd E:\AI\healthydiet\mobile
+npx tsc --noEmit
+```
+
+Git：
+
+```powershell
+cd E:\AI\healthydiet
+git status --short
+git log -5 --oneline
+```
+
+推送：
+
+```powershell
+git push origin main
+```
+
+如果 GitHub 连接失败，多半是网络问题，稍后重试或开启可访问 GitHub 的网络环境。
+
+## 排查优先级
+
+遇到问题按这个顺序排查：
+
+1. 手机 App 登录页接口地址是否为 `https://strong-amazement-production-c91d.up.railway.app`。
+2. 浏览器是否能打开 `https://strong-amazement-production-c91d.up.railway.app/health`。
+3. Railway 当前部署是否成功，确认服务是 `strong-amazement`。
+4. 管理员全局 AI 设置是否正确，尤其接口地址、模型、密钥和协议；没有已保存配置时再核对 Railway Variables。
+5. 手机是否安装了最新 APK，而不是旧版缓存。
+6. 如果只改后端，等待 Railway 自动部署即可；如果改了 `mobile/App.tsx`，必须重新打包安装 App。
+
+## 健康算法边界
+
+- BMR 使用 Mifflin-St Jeor 公式。
+- TDEE 使用活动系数估算。
+- 目标体重速度会折算为每日热量调整，并设置保守限制。
+- 运动消耗基于 MET、体重、运动时长估算。
+- 所有营养和运动结果用于日常记录，不等同于医生或注册营养师建议。
