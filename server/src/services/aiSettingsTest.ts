@@ -9,6 +9,17 @@ export async function testPrimaryAI(settings: AISettings) {
   return { ok: true, model: result.ai?.model, elapsedMs: Date.now() - started };
 }
 
+export function selectTestRoute(settings: AISettings, route: 'primary' | 'backup'): AISettings {
+  if (route === 'primary') return settings;
+  // Match runtime fallback rules without sending the primary key to another host.
+  const baseUrl = settings.aiBackupBaseUrl || settings.aiBaseUrl;
+  return { ...settings, aiProvider: settings.aiBackupProvider, aiBaseUrl: baseUrl,
+    aiModel: settings.aiBackupModel || settings.aiModel,
+    aiApiKey: settings.aiBackupApiKey || (baseUrl === settings.aiBaseUrl ? settings.aiApiKey : ''),
+    aiImageDetail: settings.aiBackupImageDetail || settings.aiImageDetail,
+    aiTimeoutMs: settings.aiBackupTimeoutMs || settings.aiTimeoutMs };
+}
+
 export function describeAITestFailure(error: unknown, timeoutMs: number) {
   if (error instanceof GeminiResponseError && !error.upstreamStatus) {
     return { code: error.code, upstreamStatus: null, message: `测试失败：${error.message} 当前线上配置未改变。` };

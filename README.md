@@ -14,20 +14,38 @@ React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记�
 
 ## 当前版本与下载
 
-- Android 版本：**1.1.2**（`versionCode: 4`）。
-- 移动端构建标识：`2026-09-15-r17`，对应功能提交 `ad6d72d`。
-- [v1.1.2 发布说明](https://github.com/Qian-Que/nutrition-app/releases/tag/v1.1.2)
-- [下载 Android APK](https://github.com/Qian-Que/nutrition-app/releases/download/v1.1.2/NutriFlow-v1.1.2-android.apk)
+- Android 版本：**1.2.0**（`versionCode: 5`）。
+- 移动端构建标识：`2026-10-23-r18`。
+- [v1.2.0 发布说明](https://github.com/Qian-Que/nutrition-app/releases/tag/v1.2.0)
+- [下载 Android APK](https://github.com/Qian-Que/nutrition-app/releases/download/v1.2.0/NutriFlow-v1.2.0-android.apk)
 - 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
-- 此次发布上传已验证的 1.1.2 安装包，不改变主备 AI 配置，也不代表第三方主线路已通过实测。
+- 此次发布不改变主备 AI 配置；测速功能不会发布草稿，也不代表第三方模型已通过真实图片测试。
 
 APK SHA-256：
 
 ```text
-874affef311e869d3ac84f03d51f2516858126220a92b0593196b243bffb5e74
+4edb8b07aaf78bdd2153856e70ad1cff085e29d661a2677580e3297245b4521f
 ```
 
 近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
+
+### 1.2.0 体验与速度改进
+
+- 日夜主题采用中性背景、清晰边界和多色营养图表；统一照片、相机、发送图标，增大常用操作触控区域。
+- 新增自动、饮食、运动三种记录类型。明确选择饮食或运动后，跳过前置 AI 分类请求；自动模式保留原有分类流程。
+- 显示保存草稿、分类、识别、保存记录等实际阶段与已用时间。请求期间锁定输入并防止重复提交。
+- 有缓存时先显示记录；静默刷新不再弹出大加载指示器。保存完成后，列表和日历后台刷新，不阻塞下一次输入。
+- 设置页可独立测试主、备用线路，保留最近四次成功的文字测试耗时；增加“兼容·Chat”协议选项，避免仅支持 Chat 的服务先尝试 Responses。
+
+### 如何判断 API 是否慢
+
+在“设置 → 全局 AI”中分别测试主备线路。后端识别耗时包含后端到服务商的请求、模型生成与解析；总等待还包含客户端到后端的往返和应用处理，二者差值不是精确网络延迟。测试只使用固定文字，不代表图片识别速度或质量。
+
+国内视觉备用可先评估阿里云百炼 `qwen3-vl-flash`，官方文档列明支持视觉理解且默认不开启思考。协议选择“兼容·Chat”，接口地址和模型可用性以账号控制台为准，使用独立密钥。[千问视觉文档](https://help.aliyun.com/zh/model-studio/vision/)、[兼容 API 文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)。
+
+第二候选是火山方舟 `doubao-seed-2-0-lite-260428`；该版本默认开启思考，官方支持关闭，但当前应用尚未提供该服务商专用的思考参数开关，因此不能保证直接接入后更快。[模型列表](https://docs.volcengine.com/docs/ark/model-list?lang=en)、[思考模式](https://docs.volcengine.com/docs/ark/deep-thinking?lang=zh)。
+
+本次未使用这些供应商的真实密钥做速度或食物识别质量对比，也未替换线上模型。建议用同一组餐食照片比较完整结果耗时、识别正确率和失败率，再决定主备顺序；Railway 到国内服务的跨境链路也可能影响速度。
 
 ## 新窗口快速衔接
 
@@ -82,6 +100,8 @@ npx tsc --noEmit
 ```
 
 1.1.2 功能提交：`ad6d72d Handle Gemini output limits and streamed response diagnostics`。该版本已通过后端构建、移动端类型检查、AI 测试/响应解析、权限与数据保留、离线同步回归检查；APK 构建和签名校验通过。第三方主线路实际可用性仍需在应用设置中测试。
+
+1.2.0 已通过上述回归检查，并验证主备测试权限隔离、密钥隔离、明确类型跳过分类、自动模式保留分类、输入锁定，以及 320/390/1280 宽度无页面横向溢出。浏览器流程使用隔离测试账号与模拟 AI 响应；未声称完成安卓真机端到端测试。
 
 ## 目录结构
 

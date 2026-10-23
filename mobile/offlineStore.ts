@@ -3,7 +3,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 
 export type PendingWrite = { id: string; path: string; body: Record<string, any>; error?: string; createdAt: string; serverRecord?: Record<string, any> };
-export type Draft = { text: string; imageBase64: string | null; mimeType: string; date: string };
+export type Draft = { text: string; imageBase64: string | null; mimeType: string; date: string; entryMode?: 'AUTO' | 'FOOD' | 'EXERCISE' };
 const sessions = new Map<string, string>();
 const locks = new Map<string, Promise<unknown>>();
 const listeners = new Set<() => void>();

@@ -9,7 +9,7 @@ import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -31,7 +31,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-09-15-r17";
+const APP_BUILD_LABEL = "2026-10-23-r18";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -80,16 +80,16 @@ const journalThemeTokens: Record<
   }
 > = {
   day: {
-    background: "#f3f5f4",
+    background: "#f2f4f7",
     surface: "#ffffff",
-    surfaceAlt: "#edf2f0",
-    surfaceSoft: "#e2eee8",
-    border: "#dce3df",
-    borderStrong: "#b9c8c0",
-    input: "#f9fbfa",
-    text: "#202923",
-    textMuted: "#637369",
-    textSoft: "#42584b",
+    surfaceAlt: "#e9edf2",
+    surfaceSoft: "#edf1f6",
+    border: "#dce1e8",
+    borderStrong: "#b8c2cf",
+    input: "#ffffff",
+    text: "#20262d",
+    textMuted: "#5e6b7a",
+    textSoft: "#465360",
     activeText: "#164f36",
     accent: "#26734f",
     accentSoft: "#dcefe3",
@@ -101,22 +101,22 @@ const journalThemeTokens: Record<
     fiber: "#56b880",
     exercise: "#6aa6ff",
     danger: "#d75b5b",
-    placeholder: "#9b9188",
+    placeholder: "#758190",
     tabBar: "#ffffff",
     tabBorder: "#cdd8d1",
     statusBar: "dark",
   },
   night: {
-    background: "#151918",
-    surface: "#202725",
-    surfaceAlt: "#1b211f",
-    surfaceSoft: "#2b3731",
-    border: "#36413b",
-    borderStrong: "#56695e",
-    input: "#181e1b",
+    background: "#141619",
+    surface: "#22262b",
+    surfaceAlt: "#1c1f24",
+    surfaceSoft: "#2b3037",
+    border: "#39414b",
+    borderStrong: "#596572",
+    input: "#1b1e23",
     text: "#f4f9ff",
-    textMuted: "#a0b3a8",
-    textSoft: "#d0ded6",
+    textMuted: "#a7b2c1",
+    textSoft: "#d0d8e2",
     activeText: "#f7fbff",
     accent: "#65b98b",
     accentSoft: "#284c38",
@@ -129,8 +129,8 @@ const journalThemeTokens: Record<
     exercise: "#8ab6ff",
     danger: "#ff8080",
     placeholder: "#8f9bb0",
-    tabBar: "#1b211f",
-    tabBorder: "#3a443f",
+    tabBar: "#1c1f24",
+    tabBorder: "#39414b",
     statusBar: "light",
   },
 };
@@ -2306,6 +2306,18 @@ function DashboardScreen({
 
   const [conversationInput, setConversationInput] = useState('');
   const [conversationLoading, setConversationLoading] = useState(false);
+  const sendingRef = useRef(false);
+  const loadRequestRef = useRef(0);
+  const [entryMode, setEntryMode] = useState<'AUTO' | 'FOOD' | 'EXERCISE'>('AUTO');
+  const [recognitionStage, setRecognitionStage] = useState('');
+  const [recognitionSeconds, setRecognitionSeconds] = useState(0);
+  useEffect(() => {
+    if (!conversationLoading) return;
+    const start = Date.now();
+    setRecognitionSeconds(0);
+    const timer = setInterval(() => setRecognitionSeconds(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [conversationLoading]);
   const [conversationImageUri, setConversationImageUri] = useState<string | null>(null);
   const [conversationImageBase64, setConversationImageBase64] = useState<string | null>(null);
   const [conversationImageMimeType, setConversationImageMimeType] = useState('image/jpeg');
@@ -2434,6 +2446,7 @@ function DashboardScreen({
     void readDraft(token).then(draft => {
       if (!active || !draft) return;
       setConversationInput(draft.text);
+      if (draft.entryMode === 'FOOD' || draft.entryMode === 'EXERCISE') setEntryMode(draft.entryMode);
       setConversationImageBase64(draft.imageBase64);
       setConversationImageMimeType(draft.mimeType);
       setConversationImageUri(draft.imageBase64 ? `data:${draft.mimeType};base64,${draft.imageBase64}` : null);
@@ -2449,11 +2462,11 @@ function DashboardScreen({
   useEffect(() => {
     if (!draftReady) return;
     const timer = setTimeout(() => {
-      void writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate })
+      void writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate, entryMode })
         .catch(() => setSyncMessage('草稿未保存到本地，请检查存储空间'));
     }, 250);
     return () => clearTimeout(timer);
-  }, [draftReady, token, conversationInput, conversationImageBase64, conversationImageMimeType, selectedDate]);
+  }, [draftReady, token, conversationInput, conversationImageBase64, conversationImageMimeType, selectedDate, entryMode]);
 
   const resetEditState = useCallback(() => {
     setEditLogId(null);
@@ -2482,7 +2495,8 @@ function DashboardScreen({
   }, []);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
-    setLoading(true);
+    const requestId = ++loadRequestRef.current;
+    if (!options?.silent) setLoading(true);
     const foodPath = `/api/logs?date=${selectedDate}`;
     const exercisePath = `/api/exercises?date=${selectedDate}`;
     try {
@@ -2490,14 +2504,17 @@ function DashboardScreen({
         readCache<{ logs: FoodLog[] }>(token, foodPath),
         readCache<{ exercises: ExerciseLog[] }>(token, exercisePath),
       ]);
-      if (cachedFood) setLogs(cachedFood.logs);
-      if (cachedExercise) setExercises(cachedExercise.exercises);
+      if (requestId !== loadRequestRef.current) return;
+      if (!options?.silent && cachedFood) setLogs(cachedFood.logs);
+      if (!options?.silent && cachedExercise) setExercises(cachedExercise.exercises);
+      if (cachedFood || cachedExercise) setLoading(false);
       const results = await Promise.allSettled([
         apiRequest<{ logs: FoodLog[]; _offline?: boolean }>(foodPath, {}, token, { timeoutMs: 8000 }),
         apiRequest<{ exercises: ExerciseLog[]; _offline?: boolean }>(exercisePath, {}, token, { timeoutMs: 8000 }),
         apiRequest<{ profile: NonNullable<typeof dailyTarget>; _offline?: boolean }>('/api/profile/targets', {}, token, { timeoutMs: 8000 }),
       ]);
       const [food, exercise, target] = results;
+      if (requestId !== loadRequestRef.current) return;
       if (results.some(result => result.status === 'rejected' && isUnauthorizedError(result.reason))) { onAuthInvalid(); return; }
       if (food.status === 'fulfilled') setLogs(food.value.logs);
       if (exercise.status === 'fulfilled') setExercises(exercise.value.exercises);
@@ -2511,8 +2528,8 @@ function DashboardScreen({
       await updatePending(token, entries => entries.filter(entry => !entry.serverRecord || !known.has(entry.id)));
       setPreviousDayNetCalories(null);
     } catch {
-      if (!options?.silent) setSyncMessage('暂时无法连接，已保留本地记录和草稿');
-    } finally { setLoading(false); }
+      if (requestId === loadRequestRef.current && !options?.silent) setSyncMessage('暂时无法连接，已保留本地记录和草稿');
+    } finally { if (requestId === loadRequestRef.current) setLoading(false); }
   }, [onAuthInvalid, selectedDate, token]);
 
   const loadCalendar = useCallback(async (options?: { silent?: boolean }) => {
@@ -2882,19 +2899,25 @@ function DashboardScreen({
   ]);
 
   const sendConversationMessage = useCallback(async () => {
-    if (!draftReady || conversationLoading) return;
-    try { await writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate }); }
-    catch { Alert.alert('草稿未保存', '本地存储失败，请检查剩余空间后重试'); return; }
+    if (!draftReady || conversationLoading || sendingRef.current) return;
+    sendingRef.current = true;
+    setConversationLoading(true);
+    setRecognitionStage('保存草稿');
+    try { await writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate, entryMode }); }
+    catch { sendingRef.current = false; setConversationLoading(false); Alert.alert('草稿未保存', '本地存储失败，请检查剩余空间后重试'); return; }
     const currentInput = conversationInput.trim();
     const hasImage = Boolean(conversationImageBase64);
 
     if (!currentInput && !hasImage) {
+      sendingRef.current = false;
+      setConversationLoading(false);
       Alert.alert('提示', '请先输入内容，或添加一张图片。');
       return;
     }
 
-    let intendedEntryKind: EntryKind = "UNKNOWN";
+    let intendedEntryKind: EntryKind = entryMode === 'AUTO' ? 'UNKNOWN' : entryMode;
     setConversationLoading(true);
+    setRecognitionStage(entryMode === 'AUTO' ? '判断记录类型' : entryMode === 'FOOD' ? '识别饮食' : '识别运动');
     try {
       const description = currentInput.slice(0, 1200);
       const persistExerciseAnalysis = async (analysisRaw: ExerciseAnalysis, notePrefix?: string) => {
@@ -2917,6 +2940,7 @@ function DashboardScreen({
           ...aiUsageFromAnalysis(analysis),
         };
 
+        setRecognitionStage('保存记录');
         const saveState = await persistWithAmbiguousRecovery('/api/exercises', requestBody, token);
 
         if (saveState === 'pending') {
@@ -2944,10 +2968,10 @@ function DashboardScreen({
         await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
         setConversationInput('');
         clearConversationImage();
-        await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
+        void Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
       };
 
-      try {
+      if (entryMode === 'AUTO') try {
         const classificationPayload = await apiRequest<{ classification: EntryClassification }>(
           "/api/classifier/analyze",
           {
@@ -2971,6 +2995,7 @@ function DashboardScreen({
 
       const shouldTreatAsExercise =
         intendedEntryKind === "EXERCISE" || (intendedEntryKind === "UNKNOWN" && isExerciseIntent(description));
+      setRecognitionStage(shouldTreatAsExercise ? '识别运动' : '识别饮食');
 
       if (!hasImage && shouldTreatAsExercise) {
         const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
@@ -3020,6 +3045,7 @@ function DashboardScreen({
       }
 
       let usedTextFallback = false;
+      setRecognitionStage('识别饮食');
       let usedLocalFallback = false;
       let payload: { analysis: NutritionAnalysis };
 
@@ -3127,6 +3153,7 @@ function DashboardScreen({
         ...aiUsageFromAnalysis(analysis),
       };
 
+      setRecognitionStage('保存记录');
       const saveState = await persistWithAmbiguousRecovery('/api/logs', requestBody, token);
 
       if (saveState === 'pending') {
@@ -3163,7 +3190,7 @@ function DashboardScreen({
       await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
       setConversationInput('');
       clearConversationImage();
-      await Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
+      void Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
     } catch (error) {
       if (isUnauthorizedError(error)) {
         onAuthInvalid();
@@ -3178,9 +3205,11 @@ function DashboardScreen({
       }
       Alert.alert('发送失败', normalizeErrorMessage(error));
     } finally {
+      sendingRef.current = false;
       setConversationLoading(false);
     }
   }, [
+    entryMode,
     clearConversationImage,
     conversationImageBase64,
     conversationImageMimeType,
@@ -3825,33 +3854,50 @@ function DashboardScreen({
         {conversationImageUri ? (
           <View style={styles.journalPendingImageWrap}>
             <Image source={{ uri: conversationImageUri }} style={styles.journalPendingImage} />
-            <Pressable style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
+            <Pressable disabled={conversationLoading} style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
               <Text style={[styles.journalPendingRemoveText, themedJournal.text]}>移除图片</Text>
             </Pressable>
           </View>
         ) : null}
 
+        <View style={[styles.composerModeRow, { borderTopColor: journalTheme.border }]}>
+          {([{ value: 'AUTO', label: '自动', icon: 'sparkles-outline' }, { value: 'FOOD', label: '饮食', icon: 'restaurant-outline' }, { value: 'EXERCISE', label: '运动', icon: 'fitness-outline' }] as const).map(option => (
+            <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading}
+              onPress={() => setEntryMode(option.value)} style={[styles.composerMode, { backgroundColor: entryMode === option.value ? journalTheme.accentSoft : journalTheme.surfaceAlt }]}>
+              <Ionicons name={option.icon} size={16} color={entryMode === option.value ? journalTheme.accent : journalTheme.textMuted} />
+              <Text style={{ fontSize: 12, fontWeight: '600', color: entryMode === option.value ? journalTheme.activeText : journalTheme.textMuted }}>{option.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {conversationLoading && <View style={styles.recognitionProgress} accessibilityLiveRegion='polite'>
+          <ActivityIndicator size='small' color={journalTheme.accent} />
+          <Text style={{ flex: 1, fontSize: 12, color: journalTheme.text }}>{recognitionStage}{recognitionSeconds >= 20 && recognitionStage !== '保存记录' ? ' · 等待模型响应' : ''}</Text>
+          <Text style={{ fontSize: 12, color: journalTheme.textMuted }}>{recognitionSeconds} 秒</Text>
+        </View>}
         <View style={styles.journalComposerRow}>
-          <Pressable style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
-            <Text style={[styles.journalMediaButtonText, themedJournal.text]}>🖼</Text>
+          <Pressable accessibilityLabel='选择照片' disabled={conversationLoading} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
+            <Ionicons name='image-outline' size={21} color={journalTheme.textSoft} />
           </Pressable>
-          <Pressable style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
-            <Text style={[styles.journalMediaButtonText, themedJournal.text]}>📷</Text>
+          <Pressable accessibilityLabel='拍照' disabled={conversationLoading} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
+            <Ionicons name='camera-outline' size={21} color={journalTheme.textSoft} />
           </Pressable>
           <TextInput
             style={[styles.journalInput, themedJournal.input]}
             value={conversationInput}
+            editable={!conversationLoading}
+            accessibilityLabel='记录内容'
             onChangeText={setConversationInput}
-            placeholder='你吃了什么或做了什么锻炼？可加图片说明。'
+            placeholder={entryMode === 'EXERCISE' ? '例如：跑步 30 分钟' : entryMode === 'FOOD' ? '例如：一碗米饭和鸡胸肉' : '记录这一餐或一次运动'}
             placeholderTextColor={journalTheme.placeholder}
             multiline
           />
           <Pressable
             style={[styles.journalSendButton, { backgroundColor: conversationLoading ? journalTheme.borderStrong : journalTheme.accent }]}
             onPress={() => void sendConversationMessage()}
-            disabled={conversationLoading}
+            disabled={conversationLoading || !draftReady || (!conversationInput.trim() && !conversationImageBase64)}
+            accessibilityLabel='发送记录'
           >
-            <Text style={styles.journalSendButtonText}>{conversationLoading ? '发送中' : '发送'}</Text>
+            <Ionicons name={conversationLoading ? 'hourglass-outline' : 'arrow-up'} size={22} color={journalThemeMode === 'night' ? '#142019' : '#ffffff'} />
           </Pressable>
         </View>
 
@@ -3863,6 +3909,7 @@ function DashboardScreen({
               return (
                 <Pressable
                   key={option.value}
+                  disabled={conversationLoading}
                   style={[styles.journalVisibilityChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
                   onPress={() => setConversationVisibility(option.value)}
                 >
@@ -6712,7 +6759,7 @@ const styles = StyleSheet.create({
   },
   journalEntryTitle: {
     color: "#f4f9ff",
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "800",
     lineHeight: 20,
   },
@@ -6770,6 +6817,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#142744",
     paddingHorizontal: 10,
     paddingVertical: 5,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   journalEntryActionText: {
     color: "#dce9ff",
@@ -6881,11 +6931,14 @@ const styles = StyleSheet.create({
   journalComposerRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 4,
+    gap: 6,
   },
+  composerModeRow: { flexDirection: 'row', gap: 6, paddingTop: 8, borderTopWidth: 1 },
+  composerMode: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 36, borderRadius: 6 },
+  recognitionProgress: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
   journalMediaButton: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 44,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#2d3e5d",
@@ -6899,11 +6952,11 @@ const styles = StyleSheet.create({
   },
   journalInput: {
     flex: 1,
-    minHeight: 34,
+    minHeight: 44,
     maxHeight: 96,
     borderWidth: 1,
     borderColor: "#29384f",
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: "#111b2d",
     color: "#e8f0ff",
     paddingHorizontal: 9,
@@ -6912,8 +6965,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   journalSendButton: {
-    minWidth: 58,
-    height: 34,
+    width: 44,
+    height: 44,
     borderRadius: 8,
     backgroundColor: "#2a6dff",
     alignItems: "center",

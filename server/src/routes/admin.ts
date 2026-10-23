@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
 import { getAIConfig, isAdmin, publicAISettings, resetAISettings, saveAISettings } from "../lib/aiSettings";
-import { describeAITestFailure, testPrimaryAI } from "../services/aiSettingsTest";
+import { describeAITestFailure, selectTestRoute, testPrimaryAI } from "../services/aiSettingsTest";
 
 const provider = z.enum(["openai", "openai_compat_auto", "openai_compat_responses", "openai_compat_chat", "gemini"]);
 const endpoint = z.string().max(500).refine(value => {
@@ -30,10 +30,16 @@ adminRouter.use((req, res, next) => {
 adminRouter.get("/ai-settings", (_req, res) => { res.json(publicAISettings()); });
 adminRouter.delete("/ai-settings", (_req, res) => { resetAISettings(); res.json(publicAISettings()); });
 adminRouter.post("/ai-settings/test", async (req, res) => {
+  const route = req.query.route ?? 'primary';
+  if (route !== 'primary' && route !== 'backup') { res.status(400).json({ message: '未知测试线路' }); return; }
   const parsed = settingsSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ message: parsed.error.issues[0]?.message }); return; }
-  const settings = resolveSettings(parsed.data);
-  if (!settings.aiApiKey) { res.status(400).json({ message: "请填写主线路 API 密钥" }); return; }
+  const draft = resolveSettings(parsed.data);
+  if (route === 'backup' && !draft.aiBackupBaseUrl && !draft.aiBackupModel && !draft.aiBackupApiKey) {
+    res.status(400).json({ message: '请先配置备用线路' }); return;
+  }
+  const settings = selectTestRoute(draft, route);
+  if (!settings.aiApiKey) { res.status(400).json({ message: "请填写所测试线路的 API 密钥" }); return; }
   try {
     res.json(await testPrimaryAI(settings));
   } catch (error) { res.status(502).json(describeAITestFailure(error, settings.aiTimeoutMs)); }

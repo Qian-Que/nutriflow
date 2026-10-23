@@ -12,7 +12,7 @@ type Settings = {
   aiBackupProvider: string; aiBackupBaseUrl: string; aiBackupModel: string; aiBackupApiKey?: string; aiBackupImageDetail: string; aiBackupTimeoutMs: number;
   hasApiKey?: boolean; hasBackupApiKey?: boolean; source?: string; updatedAt?: string | null;
 };
-const providers = [{ value: 'openai_compat_auto', label: '兼容接口' }, { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' }];
+const providers = [{ value: 'openai_compat_auto', label: '兼容·自动' }, { value: 'openai_compat_chat', label: '兼容·Chat' }, { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' }];
 
 export function SettingsPanel({ token, email, request, theme, onClose, onLogout, mode, onModeChange }: {
   token: string; email: string; request: Request; theme: Theme; onClose: () => void; onLogout: () => void;
@@ -24,6 +24,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [backup, setBackup] = useState(false);
+  const [timings, setTimings] = useState<{ route: string; model: string; server: number; total: number }[]>([]);
   const text = { color: theme.text };
   const muted = { color: theme.textMuted };
   const button = [styles.button, { borderColor: theme.border, backgroundColor: theme.surface }];
@@ -46,7 +47,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
       aiBackupApiKey: backup ? editable.aiBackupApiKey : '', clearBackupKey: !backup,
     };
   };
-  const action = async (kind: 'save' | 'test' | 'reset' | 'export') => {
+  const action = async (kind: 'save' | 'test' | 'testBackup' | 'reset' | 'export') => {
     setBusy(true); setMessage('');
     try {
       if (kind === 'export') {
@@ -55,12 +56,16 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
         await FileSystem.writeAsStringAsync(path, JSON.stringify(data, null, 2));
         if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: '导出我的记录' });
         else throw new Error('当前设备不支持文件分享');
-      } else if (kind === 'test') {
+      } else if (kind === 'test' || kind === 'testBackup') {
         const draft = payload();
+        const route = kind === 'testBackup' ? 'backup' : 'primary';
+        const label = route === 'backup' ? '备用线路' : '主线路';
         // Compatibility mode may try Responses followed by Chat Completions.
-        const timeoutMs = Math.max(60000, draft.aiTimeoutMs * 2 + 15000);
-        const result = await request<{ elapsedMs: number }>('/api/admin/ai-settings/test', { method: 'POST', body: JSON.stringify(draft) }, token, { timeoutMs });
-        setMessage(`主线路测试通过，用时 ${(result.elapsedMs / 1000).toFixed(1)} 秒；尚未发布`);
+        const timeoutMs = Math.max(60000, (route === 'backup' ? draft.aiBackupTimeoutMs || draft.aiTimeoutMs : draft.aiTimeoutMs) * 2 + 15000);
+        const start = Date.now();
+        const result = await request<{ elapsedMs: number; model: string }>(`/api/admin/ai-settings/test?route=${route}`, { method: 'POST', body: JSON.stringify(draft) }, token, { timeoutMs });
+        setTimings(current => [{ route: label, model: result.model, server: result.elapsedMs, total: Date.now() - start }, ...current].slice(0, 4));
+        setMessage(`${label}文字测试通过；配置未发布`);
       } else {
         const data = await request<Settings>('/api/admin/ai-settings', { method: kind === 'save' ? 'PUT' : 'DELETE', ...(kind === 'save' ? { body: JSON.stringify(payload()) } : {}) }, token);
         apply(data);
@@ -98,6 +103,10 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
         </View>
         {loading && <ActivityIndicator color={theme.accent} />}
         {!!message && <Text accessibilityLiveRegion='polite' style={[styles.message, text, { backgroundColor: theme.accentSoft }]}>{message}</Text>}
+        {timings.map((timing, index) => <View key={index} style={{ borderBottomWidth: 1, borderBottomColor: theme.border, paddingBottom: 10, gap: 4 }}>
+          <Text style={text}>{timing.route} · {timing.model}</Text>
+          <Text style={muted}>后端识别 {(timing.server / 1000).toFixed(1)} 秒 · 总等待 {(timing.total / 1000).toFixed(1)} 秒</Text>
+        </View>)}
         {!loading && !settings && <Pressable onPress={() => void load()} style={button}><Ionicons name='refresh-outline' size={18} color={theme.accent} /><Text style={text}>刷新设置</Text></Pressable>}
         {admin && settings && <View style={[styles.section, { borderTopColor: theme.border }]}>
           <Text style={[styles.title, text]}>全局 AI</Text>
@@ -122,6 +131,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
           </>}
           <View style={styles.row}>
             <Pressable disabled={busy} onPress={() => void action('test')} style={button}><Ionicons name='pulse-outline' size={18} color={theme.accent} /><Text style={text}>测试主线路</Text></Pressable>
+            {backup && <Pressable disabled={busy} onPress={() => void action('testBackup')} style={button}><Ionicons name='pulse-outline' size={18} color={theme.accent} /><Text style={text}>测试备用线路</Text></Pressable>}
             <Pressable disabled={busy} onPress={() => Alert.alert('发布全局配置', '保存后，所有用户的新识别请求将使用此配置。', [{ text: '取消', style: 'cancel' }, { text: '保存生效', onPress: () => void action('save') }])} style={[button, { backgroundColor: theme.accent }]}><Ionicons name='save-outline' size={18} color='#ffffff' /><Text style={{ color: '#ffffff' }}>保存生效</Text></Pressable>
           </View>
           <Pressable disabled={busy} onPress={() => Alert.alert('恢复环境配置', '将移除在线配置，恢复服务器中设置的主、备用模型。', [{ text: '取消', style: 'cancel' }, { text: '恢复', onPress: () => void action('reset') }])} style={button}><Ionicons name='arrow-undo-outline' size={18} color={theme.accent} /><Text style={text}>恢复环境配置</Text></Pressable>

@@ -3,7 +3,7 @@ process.env.SQLITE_PATH = ':memory:';
 const { db } = require('../dist/lib/db');
 const { getAIConfig, withPreviewSettings } = require('../dist/lib/aiSettings');
 const { GEMINI_MAX_OUTPUT_TOKENS, parseGeminiResponseBody, extractGeminiText } = require('../dist/services/geminiResponse');
-const { testPrimaryAI, describeAITestFailure } = require('../dist/services/aiSettingsTest');
+const { testPrimaryAI, describeAITestFailure, selectTestRoute } = require('../dist/services/aiSettingsTest');
 const { analyzeFoodText, analyzeFoodImage } = require('../dist/services/aiNutrition');
 const { analyzeExerciseText } = require('../dist/services/aiExercise');
 const { classifyEntry } = require('../dist/services/aiClassifier');
@@ -26,6 +26,10 @@ function expectCode(body, code, status = null) {
 }
 
 async function main() {
+  const backup = selectTestRoute({ ...settings, aiBackupProvider: 'openai_compat_chat', aiBackupBaseUrl: 'https://backup.invalid/v1', aiBackupModel: 'backup-chat', aiBackupApiKey: 'backup-secret', aiBackupTimeoutMs: 12345 }, 'backup');
+  assert.equal(backup.aiApiKey, 'backup-secret'); assert.equal(backup.aiTimeoutMs, 12345); assert.equal(backup.aiModel, 'backup-chat');
+  assert.equal(selectTestRoute({ ...settings, aiBackupBaseUrl: 'https://backup.invalid/v1' }, 'backup').aiApiKey, '');
+  assert.equal(selectTestRoute(settings, 'primary'), settings);
   const serialized = JSON.stringify(food);
   const fragments = [candidate(serialized.slice(0, 25), undefined), candidate(serialized.slice(25))];
   delete fragments[0].candidates[0].finishReason;

@@ -38,9 +38,12 @@ async function main() {
     assert.equal((await api('/api/admin/ai-settings')).status, 401);
     for (const method of ['GET', 'PUT', 'DELETE']) assert.equal((await api('/api/admin/ai-settings', method, undefined, member)).status, 403);
     assert.equal((await api('/api/admin/ai-settings/test', 'POST', {}, member)).status, 403);
+    assert.equal((await api('/api/admin/ai-settings/test?route=backup', 'POST', {}, member)).status, 403);
+    assert.equal((await api('/api/admin/ai-settings/test?route=invalid', 'POST', {}, owner)).status, 400);
     const original = (await api('/api/admin/ai-settings', 'GET', undefined, owner)).data;
     const { hasApiKey, hasBackupApiKey, source, updatedAt, ...values } = original;
     const settings = { ...values, aiProvider: 'openai_compat_auto', aiBaseUrl: 'https://example.invalid/v1', aiModel: 'test-model', aiApiKey: 'secret-test-value', aiTimeoutMs: 20000, aiBackupProvider: 'openai_compat_auto', aiBackupBaseUrl: '', aiBackupModel: '', aiBackupImageDetail: '', aiBackupTimeoutMs: 0 };
+    assert.equal((await api('/api/admin/ai-settings/test?route=backup', 'POST', settings, owner)).status, 400);
     assert.equal((await api('/api/admin/ai-settings', 'PUT', { ...settings, aiBaseUrl: 'http://example.invalid' }, owner)).status, 400);
     assert.equal((await api('/api/admin/ai-settings', 'PUT', { ...settings, aiTimeoutMs: -1 }, owner)).status, 400);
     let saved = await api('/api/admin/ai-settings', 'PUT', settings, owner);
