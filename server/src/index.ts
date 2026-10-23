@@ -5,6 +5,7 @@ import morgan from "morgan";
 
 import { config } from "./config";
 import { recognitionRouter } from './routes/recognition';
+import { releasesRouter } from './routes/releases';
 import { authLimit, aiGuard } from './middleware/limits';
 import { requireAuth } from './middleware/auth';
 import { startRetentionJob } from "./lib/retention";
@@ -32,12 +33,13 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "nutrition-server", release: "2026-10-23-r19", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
+  res.json({ ok: true, service: "nutrition-server", release: "2026-10-24-r20", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
 });
 
 app.use("/api/auth", authLimit, authRouter);
 app.use("/api/admin", adminRouter);
 app.use('/api/recognition', recognitionRouter);
+app.use('/api/releases', releasesRouter);
 app.use("/api/data", dataRouter);
 app.use("/api/profile", profileRouter);
 app.use("/api/classifier", requireAuth, aiGuard, classifierRouter);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppUpdateNotice, type UpdateState } from './AppUpdateNotice';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
@@ -14,7 +15,8 @@ type Settings = {
 };
 const providers = [{ value: 'openai_compat_auto', label: '兼容·自动' }, { value: 'openai_compat_chat', label: '兼容·Chat' }, { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' }];
 
-export function SettingsPanel({ token, email, request, theme, onClose, onLogout, mode, onModeChange }: {
+export function SettingsPanel({ token, email, request, theme, onClose, onLogout, mode, onModeChange, update }: {
+  update: UpdateState;
   token: string; email: string; request: Request; theme: Theme; onClose: () => void; onLogout: () => void;
   mode: 'day' | 'night'; onModeChange: (mode: 'day' | 'night') => void;
 }) {
@@ -91,12 +93,14 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
   </View>;
   return <Modal visible animationType='slide' onRequestClose={onClose}>
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
         <Text style={[styles.title, text]}>设置</Text>
         <Pressable accessibilityLabel='关闭设置' onPress={onClose} style={styles.icon}><Ionicons name='close-outline' size={24} color={theme.text} /></Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
         <Text style={muted}>{email}</Text>
+        <AppUpdateNotice update={update} theme={theme} />
         <View style={styles.row}>
           <Pressable accessibilityLabel='切换日夜主题' onPress={() => onModeChange(mode === 'day' ? 'night' : 'day')} style={button}><Ionicons name={mode === 'day' ? 'sunny-outline' : 'moon-outline'} size={20} color={theme.accent} /></Pressable>
           <Pressable disabled={busy} onPress={() => void action('export')} style={button}><Ionicons name='download-outline' size={18} color={theme.accent} /><Text style={text}>导出我的数据</Text></Pressable>
@@ -139,6 +143,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
         {busy && <ActivityIndicator color={theme.accent} />}
         <Pressable disabled={busy} onPress={() => Alert.alert('退出登录', '本机待同步记录会保留，重新登录相同账号后可继续同步。', [{ text: '取消', style: 'cancel' }, { text: '退出', onPress: onLogout }])} style={button}><Ionicons name='log-out-outline' size={18} color={theme.accent} /><Text style={text}>退出登录</Text></Pressable>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   </Modal>;
 }

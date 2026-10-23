@@ -2,7 +2,7 @@
   "expo": {
     "name": "饮食营养助手",
     "slug": "nutrition-assistant-cn",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,12 +16,12 @@
       "supportsTablet": true
     },
     "android": {
-      "versionCode": 6,
+      "versionCode": 7,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "usesCleartextTraffic": true,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.qianque1.nutritionassistantcn"
@@ -35,7 +35,8 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "./plugins/withLocalNetwork"
     ]
   }
 }

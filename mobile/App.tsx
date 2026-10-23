@@ -5,6 +5,9 @@ import { acknowledge, bindStorageSession, enqueue, markPendingError, readCache, 
 import { SettingsPanel } from "./SettingsPanel";
 import { RecordImage } from './RecordImage';
 import { runRecognition, clearRecognition } from './recognitionClient';
+import { RecognitionReview } from './RecognitionReview';
+import { REVIEW_CACHE_KEY, reviewBody, type ReviewDraft } from './recognitionDraft';
+import { AppUpdateNotice, useAppUpdate, type UpdateState } from './AppUpdateNotice';
 import { scaleNutrients } from "./nutritionEditing";
 import { TrendSummary } from "./TrendSummary";
 import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
@@ -18,6 +21,11 @@ import {
   AppState,
   Alert,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Linking,
+  BackHandler,
   Modal,
   Pressable,
   ScrollView,
@@ -34,7 +42,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-23-r19";
+const APP_BUILD_LABEL = "2026-10-24-r20";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -2272,7 +2280,9 @@ function DashboardScreen({
   journalThemeMode,
   onJournalThemeModeChange,
   onOpenSettings,
+  update,
 }: {
+  update: UpdateState;
   token: string;
   onAuthInvalid: () => void;
   journalThemeMode: JournalThemeMode;
@@ -2287,6 +2297,14 @@ function DashboardScreen({
   const waiting = pending.filter(entry => !entry.serverRecord);
   const [favorites, setFavorites] = useState<FoodLog[]>([]);
   const [draftReady, setDraftReady] = useState(false);
+  const [review, setReview] = useState<ReviewDraft | null>(null);
+  const [reviewReady, setReviewReady] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const savingReviewRef = useRef(false);
+  const [imageProcessing, setImageProcessing] = useState(false);
+  const imageProcessingRef = useRef(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
   const [previousDayNetCalories, setPreviousDayNetCalories] = useState<number | null>(null);
   const [dailyTarget, setDailyTarget] = useState<null | {
@@ -2373,6 +2391,32 @@ function DashboardScreen({
   const themed = useThemedAppStyles();
   const journalTheme = journalThemeTokens[journalThemeMode];
 
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const draft = await readCache<ReviewDraft>(token, REVIEW_CACHE_KEY);
+      const outbox = await readPending(token);
+      if (draft && outbox.some(entry => entry.id === draft.body.clientRequestId)) {
+        await writeCache(token, REVIEW_CACHE_KEY, null);
+      } else if (active && draft) setReview(draft);
+    })().catch(() => { if (active) setSyncMessage('校对草稿读取失败，请检查本机存储'); })
+      .finally(() => { if (active) setReviewReady(true); });
+    return () => { active = false; };
+  }, [token]);
+  useFocusEffect(useCallback(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (detailLogId || detailExerciseId) { setDetailLogId(null); setDetailExerciseId(null); return true; }
+      if (calendarExpanded) { setCalendarExpanded(false); return true; }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [detailLogId, detailExerciseId, calendarExpanded]));
+
   const themedJournal = useMemo(
     () => ({
       screen: { backgroundColor: journalTheme.background },
@@ -2418,10 +2462,17 @@ function DashboardScreen({
   }, [conversationVisibility]);
 
   const pickConversationImage = useCallback(async (mode: 'camera' | 'library') => {
+    if (imageProcessingRef.current || review || conversationLoading) return;
+    imageProcessingRef.current = true;
+    setImageProcessing(true);
+    Keyboard.dismiss();
+    try {
     if (mode === 'camera') {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('权限不足', '请先在系统设置中允许访问相机。');
+        Alert.alert('需要相机权限', '可在系统设置中允许访问相机，或从相册选择照片。', [
+          { text: '取消', style: 'cancel' }, { text: '打开设置', onPress: () => { void Linking.openSettings().catch(() => {}); } },
+        ]);
         return;
       }
     }
@@ -2429,15 +2480,13 @@ function DashboardScreen({
     const result =
       mode === 'camera'
         ? await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            quality: 0.5,
-            base64: true,
+            allowsEditing: false,
+            quality: 1,
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
           })
         : await ImagePicker.launchImageLibraryAsync({
-            allowsEditing: true,
-            quality: 0.5,
-            base64: true,
+            allowsEditing: false,
+            quality: 1,
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
           });
 
@@ -2446,20 +2495,16 @@ function DashboardScreen({
     }
 
     const asset = result.assets[0];
-    if (!asset.base64) {
-      Alert.alert('失败', '未获取到图片数据，请重试。');
-      return;
-    }
-
-    try {
       const resized = await manipulateAsync(asset.uri, asset.width > 1280 || asset.height > 1280 ? [{ resize: asset.width >= asset.height ? { width: 1280 } : { height: 1280 } }] : [], { compress: 0.8, format: SaveFormat.JPEG, base64: true });
       const small = await manipulateAsync(resized.uri,[{resize:resized.width>=resized.height?{width:320}:{height:320}}],{compress:0.65,format:SaveFormat.JPEG,base64:true});
+      if (!resized.base64 || !small.base64) throw new Error('Missing image bytes');
       setConversationImageUri(resized.uri);
       setConversationImageBase64(resized.base64!);
       setConversationImageMimeType('image/jpeg');
       setConversationThumbnail(`data:image/jpeg;base64,${small.base64}`);
-    } catch { Alert.alert('图片处理失败','请重新选择一张图片'); }
-  }, []);
+    } catch { Alert.alert('未取得照片','可以重试拍照，或从相册选择照片；原有内容已保留'); }
+    finally { imageProcessingRef.current = false; setImageProcessing(false); }
+  }, [review, conversationLoading]);
 
   const clearConversationImage = useCallback(() => {
     setConversationThumbnail(undefined);
@@ -2933,202 +2978,87 @@ function DashboardScreen({
     token,
   ]);
 
-  const sendConversationMessage = useCallback(async () => {
-    if (!draftReady || conversationLoading || sendingRef.current) return;
-    sendingRef.current = true;
-    setConversationLoading(true);
-    setRecognitionStage('保存草稿');
-    try { await writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate, entryMode }); }
-    catch { sendingRef.current = false; setConversationLoading(false); Alert.alert('草稿未保存', '本地存储失败，请检查剩余空间后重试'); return; }
-    const currentInput = conversationInput.trim();
-    const hasImage = Boolean(conversationImageBase64);
+  const changeReview = useCallback((value: ReviewDraft) => {
+    setReview(value);
+    void writeCache(token, REVIEW_CACHE_KEY, value).catch(() => setSyncMessage('校对修改尚未存入本机，请检查存储空间'));
+  }, [token]);
 
-    if (!currentInput && !hasImage) {
-      sendingRef.current = false;
-      setConversationLoading(false);
-      Alert.alert('提示', '请先输入内容，或添加一张图片。');
-      return;
-    }
-
-    let intendedEntryKind: EntryKind = entryMode === 'AUTO' ? 'UNKNOWN' : entryMode;
-    setConversationLoading(true);
-    setRecognitionStage(entryMode === 'AUTO' ? '判断记录类型' : entryMode === 'FOOD' ? '识别饮食' : '识别运动');
+  const discardReview = useCallback(async () => {
+    if (savingReviewRef.current) return;
+    savingReviewRef.current = true; setReviewSaving(true);
     try {
-      const description = currentInput.slice(0, 1000);
-      const persistExerciseAnalysis = async (analysisRaw: ExerciseAnalysis, notePrefix?: string) => {
-        const analysis = normalizeExerciseAnalysis(analysisRaw);
-        const noteParts = [notePrefix?.trim(), analysis.notes?.trim()].filter(Boolean);
-        const clientRequestId = createConversationMessageId();
-        const loggedAt = buildLoggedAtForSelectedDate(selectedDate);
-        const note = noteParts.join('；');
-        const requestBody = {
-          clientRequestId,
-          loggedAt,
-          exerciseType: analysis.exerciseType,
-          durationMin: analysis.durationMin,
-          intensity: analysis.intensity,
-          met: analysis.met,
-          calories: analysis.calories,
-          note,
-          source: 'AI' as const,
-          visibility: conversationVisibility,
-          ...aiUsageFromAnalysis(analysis),
-        };
+      await clearRecognition(token, 'entry');
+      await writeCache(token, REVIEW_CACHE_KEY, null);
+      setReview(null); setReviewOpen(false);
+    } catch { setSyncMessage('暂时无法清理校对草稿，请重试'); }
+    finally { savingReviewRef.current = false; setReviewSaving(false); }
+  }, [token]);
 
-        setRecognitionStage('保存记录');
-        const saveState = await persistWithAmbiguousRecovery('/api/exercises', requestBody, token);
+  const saveReview = useCallback(async () => {
+    if (!review || savingReviewRef.current) return;
+    savingReviewRef.current = true; setReviewSaving(true);
+    try {
+      const body = reviewBody(review);
+      const submitted = { ...review, body, submitted: true };
+      await writeCache(token, REVIEW_CACHE_KEY, submitted);
+      setReview(submitted);
+      const state = await persistWithAmbiguousRecovery(review.kind === 'FOOD' ? '/api/logs' : '/api/exercises', body, token);
+      // The outbox owns the stable request ID from this point, including ambiguous network responses.
+      setReview(null); setReviewOpen(false);
+      setConversationInput(''); clearConversationImage();
+      await writeCache(token, REVIEW_CACHE_KEY, null).catch(() => setSyncMessage('记录已保留，校对缓存待清理'));
+      await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
+      await clearRecognition(token, 'entry').catch(() => setSyncMessage('记录已保留，识别缓存待清理'));
+      setSyncMessage(state === 'pending' ? '记录已保留在本机，联网后继续同步' : '已确认保存');
+      void load({ silent: true }); void loadCalendar({ silent: true });
+    } catch (error) {
+      if (isUnauthorizedError(error)) onAuthInvalid();
+      else Alert.alert('尚未完成保存', normalizeErrorMessage(error));
+    } finally { savingReviewRef.current = false; setReviewSaving(false); }
+  }, [review, token, clearConversationImage, selectedDate, load, loadCalendar, onAuthInvalid]);
 
-        if (saveState === 'pending') {
-          const optimisticExercise: ExerciseLog = {
-            id: `pending-${clientRequestId}`,
-            clientRequestId,
-            loggedAt,
-            exerciseType: analysis.exerciseType,
-            durationMin: analysis.durationMin,
-            intensity: analysis.intensity,
-            met: analysis.met,
-            calories: analysis.calories,
-            note,
-            source: 'AI',
-            visibility: conversationVisibility,
-            ...aiUsageFromAnalysis(analysis),
-          };
-          setExercises((current) => [optimisticExercise, ...current.filter((item) => item.clientRequestId !== clientRequestId)]);
-          setExerciseSummary((current) => ({
-            calories: current.calories + analysis.calories,
-            durationMin: current.durationMin + analysis.durationMin,
-          }));
-        }
-
-        await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
-        setConversationInput('');
-        clearConversationImage();
-        void Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
-      };
-
+  const sendConversationMessage = useCallback(async () => {
+    if (!draftReady || !reviewReady || conversationLoading || imageProcessing || sendingRef.current) return;
+    if (review) { setReviewOpen(true); return; }
+    const description = conversationInput.trim();
+    if (!description && !conversationImageBase64) return;
+    Keyboard.dismiss();
+    sendingRef.current = true; setConversationLoading(true); setRecognitionStage('保存草稿');
+    try {
+      await writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate, entryMode });
       const result = await runRecognition<{ kind: EntryKind; analysis: NutritionAnalysis | ExerciseAnalysis; fallback?: string }>(
         rawApiRequest, token, 'entry',
         { mode: entryMode, description: description || undefined, imageBase64: conversationImageBase64 ?? undefined, mimeType: conversationImageMimeType },
         setRecognitionStage,
       );
-      intendedEntryKind = result.kind;
-      if (result.kind === 'EXERCISE') {
-        await persistExerciseAnalysis(result.analysis as ExerciseAnalysis, description);
-        await clearRecognition(token, 'entry').catch(() => setSyncMessage('记录已保存，识别缓存待清理'));
-        return;
-      }
-      const usedTextFallback = result.fallback === 'TEXT_ONLY';
-      const usedLocalFallback = false;
-      const payload = { analysis: result.analysis as NutritionAnalysis };
-
-      const analysis = normalizeClientAnalysis(payload.analysis);
-      const normalized = buildPersistedNutritionFromAnalysis(analysis);
-      const itemNames = analysis.items
-        .map((item) => item.name.trim())
-        .filter((name) => name.length > 0)
-        .slice(0, 6)
-        .join('、');
-      const baseNote = currentInput || (itemNames ? `识别内容：${itemNames}` : '对话记录');
-      const note = usedLocalFallback
-        ? `${baseNote}（AI 超时，已本地估算）`
-        : usedTextFallback
-          ? `${baseNote}（图片未成功解析，已按文字估算）`
-          : baseNote;
-      const clientRequestId = createConversationMessageId();
-      const loggedAt = buildLoggedAtForSelectedDate(selectedDate);
-      const mealType = inferMealTypeForDate(selectedDate);
-      const requestBody = {
-        clientRequestId,
-        loggedAt,
-        mealType,
-        source: 'AI' as const,
-        visibility: conversationVisibility,
-        imageUri: conversationImageBase64 ? `data:${conversationImageMimeType};base64,${conversationImageBase64}` : undefined,
-        imageThumbnail: conversationThumbnail,
-        note,
-        calories: normalized.calories,
-        proteinGram: normalized.proteinGram,
-        carbsGram: normalized.carbsGram,
-        fatGram: normalized.fatGram,
-        fiberGram: normalized.fiberGram,
-        sugarGram: normalized.sugarGram,
-        sodiumMg: normalized.sodiumMg,
-        nutrients: normalized.nutrients,
-        items: analysis.items,
-        ...aiUsageFromAnalysis(analysis),
+      if (result.kind !== 'FOOD' && result.kind !== 'EXERCISE') throw new Error('未能判断记录类型，请选择饮食或运动后重试');
+      const common = {
+        clientRequestId: createConversationMessageId(), loggedAt: buildLoggedAtForSelectedDate(selectedDate),
+        source: 'AI', visibility: conversationVisibility,
       };
-
-      setRecognitionStage('保存记录');
-      const saveState = await persistWithAmbiguousRecovery('/api/logs', requestBody, token);
-
-      if (saveState === 'pending') {
-        const optimisticLog: FoodLog = {
-          id: `pending-${clientRequestId}`,
-          clientRequestId,
-          loggedAt,
-          mealType,
-          source: 'AI',
-          visibility: conversationVisibility,
-          imageUri: conversationImageUri ?? undefined,
-          note,
-          calories: normalized.calories,
-          proteinGram: normalized.proteinGram,
-          carbsGram: normalized.carbsGram,
-          fatGram: normalized.fatGram,
-          fiberGram: normalized.fiberGram,
-          sugarGram: normalized.sugarGram,
-          sodiumMg: normalized.sodiumMg,
-          nutrients: normalized.nutrients,
-          items: analysis.items,
-          ...aiUsageFromAnalysis(analysis),
-        };
-        setLogs((current) => [optimisticLog, ...current.filter((item) => item.clientRequestId !== clientRequestId)]);
-        setSummary((current) => ({
-          calories: current.calories + normalized.calories,
-          proteinGram: current.proteinGram + normalized.proteinGram,
-          carbsGram: current.carbsGram + normalized.carbsGram,
-          fatGram: current.fatGram + normalized.fatGram,
-          fiberGram: current.fiberGram + normalized.fiberGram,
-        }));
+      let body: Record<string, any>, confidence: number;
+      if (result.kind === 'EXERCISE') {
+        const analysis = normalizeExerciseAnalysis(result.analysis as ExerciseAnalysis);
+        confidence = analysis.confidence;
+        body = { ...common, exerciseType: analysis.exerciseType, durationMin: analysis.durationMin, intensity: analysis.intensity,
+          met: analysis.met, calories: analysis.calories, note: [description, analysis.notes].filter(Boolean).join('；').slice(0, 300), ...aiUsageFromAnalysis(analysis) };
+      } else {
+        const analysis = normalizeClientAnalysis(result.analysis as NutritionAnalysis);
+        confidence = analysis.confidence;
+        const note = description || analysis.items.map(item => item.name).join('、');
+        body = { ...common, ...buildPersistedNutritionFromAnalysis(analysis), items: analysis.items,
+          mealType: inferMealTypeForDate(selectedDate), note: (result.fallback === 'TEXT_ONLY' ? note.slice(0, 270) + '（图片未成功解析，已按文字估算）' : note).slice(0, 300),
+          imageUri: conversationImageBase64 ? `data:${conversationImageMimeType};base64,${conversationImageBase64}` : undefined,
+          imageThumbnail: conversationThumbnail, ...aiUsageFromAnalysis(analysis) };
       }
-
-      await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
-      setConversationInput('');
-      clearConversationImage();
-      await clearRecognition(token, 'entry').catch(() => setSyncMessage('记录已保存，识别缓存待清理'));
-      void Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
+      const draft: ReviewDraft = { kind: result.kind, body, confidence, fallback: result.fallback, acknowledged: false };
+      await writeCache(token, REVIEW_CACHE_KEY, draft);
+      setReview(draft); setReviewOpen(true);
     } catch (error) {
-      if (isUnauthorizedError(error)) {
-        onAuthInvalid();
-        return;
-      }
-      if (isEndpointNotFound(error) && (intendedEntryKind === "EXERCISE" || isExerciseIntent(conversationInput.trim()))) {
-        Alert.alert(
-          '后端未升级',
-          '当前后端还没有运动识别接口。请把最新 server 代码推送到 GitHub，并等待 Railway 重新部署完成后再试。',
-        );
-        return;
-      }
-      Alert.alert('发送失败', normalizeErrorMessage(error));
-    } finally {
-      sendingRef.current = false;
-      setConversationLoading(false);
-    }
-  }, [
-    entryMode,
-    conversationThumbnail,
-    clearConversationImage,
-    conversationImageBase64,
-    conversationImageMimeType,
-    conversationImageUri,
-    conversationInput,
-    conversationVisibility,
-    load,
-    loadCalendar,
-    onAuthInvalid,
-    selectedDate,
-    token,
-  ]);
+      if (isUnauthorizedError(error)) onAuthInvalid();
+      else Alert.alert('暂未取得校对结果', normalizeErrorMessage(error));
+    } finally { sendingRef.current = false; setConversationLoading(false); }
+  }, [draftReady, reviewReady, review, imageProcessing, conversationLoading, entryMode, conversationThumbnail, conversationImageBase64, conversationImageMimeType, conversationInput, conversationVisibility, onAuthInvalid, selectedDate, token]);
   useFocusEffect(useCallback(() => {
     let active = true;
     void load(); void loadCalendar();
@@ -3476,6 +3406,7 @@ function DashboardScreen({
 
   return (
     <SafeAreaView style={[styles.journalSafe, themedJournal.screen]}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       <View style={styles.journalContainer}>
         <View style={styles.journalTopBar}>
           <Pressable style={[styles.journalDateButton, themedJournal.surface]} onPress={() => setCalendarExpanded((prev) => !prev)}>
@@ -3501,7 +3432,9 @@ function DashboardScreen({
           <Ionicons name='refresh-outline' size={16} color={journalTheme.accent} />
         </Pressable>}
 
-        {calendarExpanded ? (
+        {!keyboardVisible && <AppUpdateNotice compact update={update} theme={journalTheme} />}
+
+        {!keyboardVisible && <>{calendarExpanded ? (
           <View style={[styles.journalCalendarCard, themedJournal.surface]}>
             <View style={styles.cardHeaderRow}>
               <Pressable style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => setSelectedMonth(shiftMonthString(selectedMonth, -1))}>
@@ -3639,18 +3572,19 @@ function DashboardScreen({
           </View>
         </View>
 
-        {!!favorites.length && <ScrollView horizontal style={{ maxHeight: 42 }} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+        </>}
+        {!keyboardVisible && !!favorites.length && <ScrollView horizontal style={{ maxHeight: 42 }} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
           {favorites.map(log => <Pressable key={log.id} style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => { setConversationInput(summarizeFoodFromLog(log)); }} onLongPress={() => {
             const next = favorites.filter(item => item.id !== log.id); setFavorites(next); void writeCache(token, 'favorites', next).catch(() => setSyncMessage('常用餐食保存失败'));
           }}><Text style={[styles.hint, themed.hint]}>{summarizeFoodFromLog(log)}</Text></Pressable>)}
         </ScrollView>}
-        <ScrollView style={[styles.journalChatList, themedJournal.surfaceAlt]} contentContainerStyle={styles.journalChatListContent}>
+        <ScrollView keyboardShouldPersistTaps='handled' keyboardDismissMode='on-drag' style={[styles.journalChatList, themedJournal.surfaceAlt]} contentContainerStyle={styles.journalChatListContent}>
           {loading ? <ActivityIndicator size='large' color={journalTheme.accent} /> : null}
 
           {!loading && sortedJournalEntries.length === 0 ? (
             <View style={[styles.journalEmptyCard, themedJournal.surface]}>
               <Text style={[styles.journalEmptyTitle, themedJournal.text]}>今天还没有记录</Text>
-              <Text style={[styles.journalEmptyText, themedJournal.mutedText]}>可在下方输入饮食或运动描述，系统会自动识别并生成记录卡片。</Text>
+              <Text style={[styles.journalEmptyText, themedJournal.mutedText]}>还没有饮食或运动记录</Text>
             </View>
           ) : null}
 
@@ -3760,10 +3694,14 @@ function DashboardScreen({
           })}
         </ScrollView>
 
-        {conversationImageUri ? (
+        {review && <Pressable accessibilityRole='button' accessibilityLabel='继续校对识别结果' onPress={() => setReviewOpen(true)} style={{ padding: 10, gap: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: journalTheme.accentSoft }}>
+          <Ionicons name='create-outline' size={20} color={journalTheme.accent} /><Text style={{ flex: 1, color: journalTheme.text }}>1 条识别结果待确认</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent} />
+        </Pressable>}
+        {imageProcessing && <ActivityIndicator accessibilityLabel='正在处理照片' color={journalTheme.accent} />}
+        {conversationImageUri && !keyboardVisible ? (
           <View style={styles.journalPendingImageWrap}>
             <Image source={{ uri: conversationImageUri }} style={styles.journalPendingImage} />
-            <Pressable disabled={conversationLoading} style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
+            <Pressable disabled={conversationLoading || imageProcessing || Boolean(review)} style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
               <Text style={[styles.journalPendingRemoveText, themedJournal.text]}>移除图片</Text>
             </Pressable>
           </View>
@@ -3771,7 +3709,7 @@ function DashboardScreen({
 
         <View style={[styles.composerModeRow, { borderTopColor: journalTheme.border }]}>
           {([{ value: 'AUTO', label: '自动', icon: 'sparkles-outline' }, { value: 'FOOD', label: '饮食', icon: 'restaurant-outline' }, { value: 'EXERCISE', label: '运动', icon: 'fitness-outline' }] as const).map(option => (
-            <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading}
+            <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading || imageProcessing || Boolean(review)}
               onPress={() => setEntryMode(option.value)} style={[styles.composerMode, { backgroundColor: entryMode === option.value ? journalTheme.accentSoft : journalTheme.surfaceAlt }]}>
               <Ionicons name={option.icon} size={16} color={entryMode === option.value ? journalTheme.accent : journalTheme.textMuted} />
               <Text style={{ fontSize: 12, fontWeight: '600', color: entryMode === option.value ? journalTheme.activeText : journalTheme.textMuted }}>{option.label}</Text>
@@ -3784,16 +3722,16 @@ function DashboardScreen({
           <Text style={{ fontSize: 12, color: journalTheme.textMuted }}>{recognitionSeconds} 秒</Text>
         </View>}
         <View style={styles.journalComposerRow}>
-          <Pressable accessibilityLabel='选择照片' disabled={conversationLoading} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
+          <Pressable accessibilityLabel='选择照片' disabled={conversationLoading || imageProcessing || Boolean(review)} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
             <Ionicons name='image-outline' size={21} color={journalTheme.textSoft} />
           </Pressable>
-          <Pressable accessibilityLabel='拍照' disabled={conversationLoading} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
+          <Pressable accessibilityLabel='拍照' disabled={conversationLoading || imageProcessing || Boolean(review)} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
             <Ionicons name='camera-outline' size={21} color={journalTheme.textSoft} />
           </Pressable>
           <TextInput
             style={[styles.journalInput, themedJournal.input]}
             value={conversationInput}
-            editable={!conversationLoading}
+            editable={!conversationLoading && !imageProcessing && !review}
             accessibilityLabel='记录内容'
             maxLength={1000}
             onChangeText={setConversationInput}
@@ -3804,8 +3742,8 @@ function DashboardScreen({
           <Pressable
             style={[styles.journalSendButton, { backgroundColor: conversationLoading ? journalTheme.borderStrong : journalTheme.accent }]}
             onPress={() => void sendConversationMessage()}
-            disabled={conversationLoading || !draftReady || (!conversationInput.trim() && !conversationImageBase64)}
-            accessibilityLabel='发送记录'
+            disabled={conversationLoading || imageProcessing || !draftReady || !reviewReady || (!review && !conversationInput.trim() && !conversationImageBase64)}
+            accessibilityLabel={review ? '打开待校对结果' : '发送记录'}
           >
             <Ionicons name={conversationLoading ? 'hourglass-outline' : 'arrow-up'} size={22} color={journalThemeMode === 'night' ? '#142019' : '#ffffff'} />
           </Pressable>
@@ -3819,7 +3757,7 @@ function DashboardScreen({
               return (
                 <Pressable
                   key={option.value}
-                  disabled={conversationLoading}
+                  disabled={conversationLoading || imageProcessing || Boolean(review)}
                   style={[styles.journalVisibilityChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
                   onPress={() => setConversationVisibility(option.value)}
                 >
@@ -3831,7 +3769,7 @@ function DashboardScreen({
         </View>
 
         <Modal visible={Boolean(editLogId)} transparent animationType='fade' onRequestClose={closeEditModal}>
-          <View
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
             style={[
               styles.journalEditModalMask,
               { backgroundColor: journalThemeMode === "day" ? "rgba(52, 43, 36, 0.36)" : "rgba(3, 8, 18, 0.72)" },
@@ -3912,17 +3850,18 @@ function DashboardScreen({
               </View>
               </ScrollView>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         <Modal visible={Boolean(editExerciseId)} transparent animationType='fade' onRequestClose={closeExerciseEditModal}>
-          <View
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
             style={[
               styles.journalEditModalMask,
               { backgroundColor: journalThemeMode === "day" ? "rgba(52, 43, 36, 0.36)" : "rgba(3, 8, 18, 0.72)" },
             ]}
           >
             <View style={[styles.journalEditModalCard, themedJournal.surface]}>
+              <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={{ gap: 10 }}>
               <Text style={[styles.journalEditModalTitle, themedJournal.text]}>编辑运动</Text>
 
               <TextInput
@@ -4002,10 +3941,13 @@ function DashboardScreen({
                   <Text style={styles.primaryButtonText}>{savingExerciseEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
+              </ScrollView>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
+        {review && reviewOpen && <RecognitionReview draft={review} theme={journalTheme} busy={reviewSaving} onChange={changeReview} onClose={() => setReviewOpen(false)} onDiscard={() => void discardReview()} onSave={() => void saveReview()} />}
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -5691,6 +5633,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
   const [journalThemeMode, setJournalThemeMode] = useState<JournalThemeMode>("night");
   const [journalThemeLoaded, setJournalThemeLoaded] = useState(false);
   const journalTheme = journalThemeTokens[journalThemeMode];
+  const update = useAppUpdate(rawApiRequest, runtimeApiBaseUrl);
 
   useEffect(() => {
     let active = true;
@@ -5727,6 +5670,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
         <Tab.Navigator
           screenOptions={({ route }) => ({
             headerShown: false,
+            tabBarHideOnKeyboard: true,
             tabBarIcon: ({ color, focused }) => (
               <Ionicons name={tabIconMap[route.name] ?? 'ellipse-outline'} size={22} color={color} />
             ),
@@ -5752,6 +5696,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
           <Tab.Screen name="记录">
             {() => (
               <DashboardScreen
+                update={update}
                 token={auth.token}
                 onAuthInvalid={onLogout}
                 journalThemeMode={journalThemeMode}
@@ -5766,7 +5711,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
         </Tab.Navigator>
         <StatusBar style={journalTheme.statusBar} />
       </NavigationContainer>
-      {settingsOpen && <SettingsPanel token={auth.token} email={auth.user.email} request={rawApiRequest} theme={journalTheme} onClose={() => setSettingsOpen(false)} onLogout={onLogout} mode={journalThemeMode} onModeChange={setJournalThemeMode} />}
+      {settingsOpen && <SettingsPanel update={update} token={auth.token} email={auth.user.email} request={rawApiRequest} theme={journalTheme} onClose={() => setSettingsOpen(false)} onLogout={onLogout} mode={journalThemeMode} onModeChange={setJournalThemeMode} />}
     </JournalThemeContext.Provider>
   );
 }
