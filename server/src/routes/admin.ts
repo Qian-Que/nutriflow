@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
+import { aiGuard } from '../middleware/limits';
 import { getAIConfig, isAdmin, publicAISettings, resetAISettings, saveAISettings } from "../lib/aiSettings";
 import { describeAITestFailure, selectTestRoute, testPrimaryAI } from "../services/aiSettingsTest";
 
@@ -29,7 +30,7 @@ adminRouter.use((req, res, next) => {
 });
 adminRouter.get("/ai-settings", (_req, res) => { res.json(publicAISettings()); });
 adminRouter.delete("/ai-settings", (_req, res) => { resetAISettings(); res.json(publicAISettings()); });
-adminRouter.post("/ai-settings/test", async (req, res) => {
+adminRouter.post("/ai-settings/test", aiGuard, async (req, res) => {
   const route = req.query.route ?? 'primary';
   if (route !== 'primary' && route !== 'backup') { res.status(400).json({ message: '未知测试线路' }); return; }
   const parsed = settingsSchema.safeParse(req.body);

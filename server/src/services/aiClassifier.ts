@@ -1,6 +1,8 @@
 import { config } from "../config";
 
 import { getAIConfig } from "../lib/aiSettings";
+import { publicAIError } from '../lib/aiErrors';
+import { aiSignal } from '../lib/aiBudget';
 import { GEMINI_MAX_OUTPUT_TOKENS, extractGeminiText, parseGeminiResponseBody } from "./geminiResponse";
 
 export type EntryKind = "FOOD" | "EXERCISE" | "UNKNOWN";
@@ -270,10 +272,10 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: aiSignal(controller.signal) });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`AI API request failed (${response.status}): ${text}`);
+      throw new Error(`AI API request failed (${response.status})`);
     }
     const body = await response.text();
     return gemini ? parseGeminiResponseBody(body) : parseJsonOrStreamPayload(body);
@@ -392,7 +394,7 @@ export async function classifyEntry(params: {
     } catch (error) {
       primaryError = error instanceof Error ? error : new Error(String(error));
       console.warn(
-        `[ai] classifier ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${primaryError.message}`,
+        `[ai] classifier ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${publicAIError(primaryError).message}`,
       );
     }
   }
@@ -405,7 +407,7 @@ export async function classifyEntry(params: {
     } catch (error) {
       const backupError = error instanceof Error ? error : new Error(String(error));
       console.warn(
-        `[ai] classifier ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${backupError.message}`,
+        `[ai] classifier ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${publicAIError(backupError).message}`,
       );
       throw new Error(
         `分类主线路失败：${primaryError?.message ?? "未配置"}；分类备用线路失败：${backupError.message}`,

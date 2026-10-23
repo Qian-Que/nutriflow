@@ -4,6 +4,9 @@ import helmet from "helmet";
 import morgan from "morgan";
 
 import { config } from "./config";
+import { recognitionRouter } from './routes/recognition';
+import { authLimit, aiGuard } from './middleware/limits';
+import { requireAuth } from './middleware/auth';
 import { startRetentionJob } from "./lib/retention";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import { authRouter } from "./routes/auth";
@@ -20,6 +23,7 @@ import { profileRouter } from "./routes/profile";
 import { weightsRouter } from "./routes/weights";
 
 const app = express();
+if (process.env.RAILWAY_ENVIRONMENT_ID) app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigin }));
@@ -28,15 +32,17 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "nutrition-server", release: "2026-10-23-r18", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
+  res.json({ ok: true, service: "nutrition-server", release: "2026-10-23-r19", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
 });
 
-app.use("/api/auth", authRouter);
+app.use("/api/auth", authLimit, authRouter);
 app.use("/api/admin", adminRouter);
+app.use('/api/recognition', recognitionRouter);
 app.use("/api/data", dataRouter);
 app.use("/api/profile", profileRouter);
-app.use("/api/classifier", classifierRouter);
-app.use("/api/nutrition", nutritionRouter);
+app.use("/api/classifier", requireAuth, aiGuard, classifierRouter);
+app.post(['/api/exercises/analyze', '/api/exercises/analyze-image'], requireAuth, aiGuard);
+app.use("/api/nutrition", requireAuth, aiGuard, nutritionRouter);
 app.use("/api/logs", logsRouter);
 app.use("/api/exercises", exercisesRouter);
 app.use("/api/weights", weightsRouter);

@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { requireAuth } from "../middleware/auth";
+import { publicAIError } from '../lib/aiErrors';
 import { classifyEntry } from "../services/aiClassifier";
 import { classifyEntrySchema } from "./schemas";
 
@@ -17,7 +18,6 @@ classifierRouter.post("/analyze", requireAuth, async (req, res) => {
     const classification = await classifyEntry(parsed.data);
     res.json({ classification });
   } catch (error) {
-    console.error("classify-entry failed:", error);
-    res.status(502).json({ message: error instanceof Error ? `记录分类失败：${error.message}` : "记录分类失败" });
+    const failure = publicAIError(error); res.status(failure.status).json({ message: failure.message });
   }
 });

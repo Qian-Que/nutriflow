@@ -2,6 +2,7 @@
 
 import { createId, db, nowIso } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
+import { inlineImage } from '../lib/logImages';
 import { normalizeFriendPair } from "../utils/friendship";
 import { respondFriendRequestSchema, sendFriendRequestSchema } from "./schemas";
 
@@ -66,7 +67,7 @@ function mapFriendLogRow(row: FriendLogRow) {
     loggedAt: row.logged_at,
     mealType: row.meal_type,
     note: row.note,
-    imageUri: row.image_uri,
+    imageUri: inlineImage(row.image_uri),
     source: row.source,
     visibility: row.visibility,
     calories: row.calories,

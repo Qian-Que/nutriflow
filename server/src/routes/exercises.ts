@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { createId, db, nowIso } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
+import { publicAIError } from '../lib/aiErrors';
 import { analyzeExerciseImage, analyzeExerciseText, estimateExerciseCalories } from "../services/aiExercise";
 import { analyzeExerciseImageSchema, analyzeExerciseSchema, createExerciseLogSchema } from "./schemas";
 
@@ -111,8 +112,7 @@ exercisesRouter.post("/analyze", requireAuth, async (req, res) => {
     const analysis = await analyzeExerciseText(parsed.data.description, weightKg);
     res.json({ analysis, weightKg });
   } catch (error) {
-    console.error("analyze-exercise failed:", error);
-    res.status(502).json({ message: error instanceof Error ? `运动识别失败：${error.message}` : "运动识别失败" });
+    const failure = publicAIError(error); res.status(failure.status).json({ message: failure.message });
   }
 });
 
@@ -133,13 +133,7 @@ exercisesRouter.post("/analyze-image", requireAuth, async (req, res) => {
     );
     res.json({ analysis, weightKg });
   } catch (error) {
-    console.error("analyze-exercise-image failed:", error);
-    const message = error instanceof Error ? error.message : "运动截图识别失败";
-    if (isExerciseImageReject(message)) {
-      res.status(422).json({ message });
-      return;
-    }
-    res.status(502).json({ message: `运动截图识别失败：${message}` });
+    const failure = publicAIError(error); res.status(failure.status).json({ message: failure.message });
   }
 });
 

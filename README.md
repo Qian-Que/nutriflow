@@ -14,20 +14,35 @@ React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记�
 
 ## 当前版本与下载
 
-- Android 版本：**1.2.0**（`versionCode: 5`）。
-- 移动端构建标识：`2026-10-23-r18`。
-- [v1.2.0 发布说明](https://github.com/Qian-Que/nutrition-app/releases/tag/v1.2.0)
-- [下载 Android APK](https://github.com/Qian-Que/nutrition-app/releases/download/v1.2.0/NutriFlow-v1.2.0-android.apk)
+- Android 版本：**1.3.0**（`versionCode: 6`）。
+- 移动端构建标识：`2026-10-23-r19`。
+- [v1.3.0 发布说明](https://github.com/Qian-Que/nutrition-app/releases/tag/v1.3.0)
+- [下载 Android APK](https://github.com/Qian-Que/nutrition-app/releases/download/v1.3.0/NutriFlow-v1.3.0-android.apk)
 - 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
 - 此次发布不改变主备 AI 配置；测速功能不会发布草稿，也不代表第三方模型已通过真实图片测试。
 
 APK SHA-256：
 
 ```text
-4edb8b07aaf78bdd2153856e70ad1cff085e29d661a2677580e3297245b4521f
+d002f57a813c67165629c65902dfd5ccb33d65759488d1a35fa8137d3aa8edc1
 ```
 
 近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
+
+### 1.3.0 可靠性与性能
+
+- 识别改为持久任务：网络中断后保留草稿与任务 ID，再次发送相同内容会查询原任务，避免重复调用模型。新接口为 `POST /api/recognition/jobs` 和 `GET /api/recognition/jobs/:id`，任务仅所属账号可读。
+- 自动分类、主备回退、文字降级共用默认 150 秒上游预算；可用 `RECOGNITION_TIMEOUT_MS` 设置 1000–180000 毫秒。队列等待不计入模型预算；客户端等待结束后仍可按原任务重取结果。
+- 已结束任务在创建满 24 小时后，由后续新任务触发清理；完成后立即清空服务端输入字段。服务重启时，未完成任务标为失败，不自动重复收费请求。任务调度针对当前单实例 SQLite 部署。
+- 图片降级为文字估算会明确标注，不再伪装成成功识图。新照片压缩至最长边 1280，生成 320 像素缩略图；照片独立存入 `food_images`，列表只取引用，详情按需取原图且检查权限。
+- 日志查询支持 `limit`、`offset` 和 `compact=1`；新版客户端自动取完当日分页，旧版接口仍可返回内联图片。旧照片按需迁移，数据导出仍包含完整照片。
+- 合并并发读取；空闲时不轮询记录，只在页面可见且有待同步项时重试同步。修复“较前日”净摄入计算。
+- 禁止本地接口故障或重开应用时静默换到云端。生产环境必须显式设置非默认 JWT 密钥；AI 错误统一脱敏。
+- 应用层限制：每 IP 每 15 分钟登录/找回各 30 次、注册 10 次；每用户 AI 每分钟 12 次、每日默认 200 次（UTC，可通过 `AI_DAILY_LIMIT` 调整）。持久任务每用户最多一个在途，最多 4 个运行、16 个在途；旧同步接口另有并发限制。被限流返回 429 和 Retry-After。
+
+部署前应备份 SQLite 数据库。图片迁移不会删除原始图片字节，但若要降级服务器到 1.3.0 之前，须先备份、停止写入，在 1.3.0 代码下运行 `node scripts/restore-inline-images.cjs` 恢复旧版的内联表示，然后再切换旧代码；该脚本不删除独立图片表。
+
+新增验证：`server/scripts/verify-reliability.cjs`、`mobile/scripts/verify-recognition-client.cjs`。已验证任务幂等/超时/权限、图片访问/迁移/导出、分页、限流、草稿重试；浏览器通过断网恢复、图片显示、32 秒空闲零列表请求和本地地址重开保留测试。APK 已通过模拟器安装与启动冒烟检查，不代表完成真实手机相机及真实 AI 服务全链路验证。
 
 ### 1.2.0 体验与速度改进
 

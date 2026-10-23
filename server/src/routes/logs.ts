@@ -3,6 +3,7 @@ import { Router } from "express";
 import { createId, db, nowIso } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { createLogSchema } from "./schemas";
+import { compactImage, resolveImage, storeImage } from '../lib/logImages';
 
 export const logsRouter = Router();
 
@@ -50,7 +51,7 @@ function buildMonthRange(monthString: string) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-function mapLogRow(row: LogRow) {
+function mapLogRow(row: LogRow, compact = false) {
   const parseMaybeJson = (value: string | null) => {
     if (!value) {
       return null;
@@ -69,7 +70,7 @@ function mapLogRow(row: LogRow) {
     loggedAt: row.logged_at,
     mealType: row.meal_type,
     note: row.note,
-    imageUri: row.image_uri,
+    imageUri: compactImage(row.id,row.image_uri,compact),
     source: row.source,
     visibility: row.visibility,
     calories: row.calories,
@@ -91,17 +92,23 @@ function mapLogRow(row: LogRow) {
 
 logsRouter.get("/", requireAuth, async (req, res) => {
   const date = typeof req.query.date === "string" ? req.query.date : undefined;
+  if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)))) { res.status(400).json({message:'日期格式不正确'}); return; }
+  const compact = req.query.compact === '1';
+  const limit = Math.max(1,Math.min(200,Number(req.query.limit) || (date ? 200 : 50)));
+  const offset = Math.max(0,Math.floor(Number(req.query.offset) || 0));
+  if (!Number.isSafeInteger(offset) || offset > 100000) { res.status(400).json({message:'分页位置不合法'}); return; }
 
   const baseQuery =
     "SELECT * FROM food_logs WHERE user_id = ?" +
     (date ? " AND logged_at >= ? AND logged_at < ?" : "") +
-    " ORDER BY logged_at DESC";
+    " ORDER BY logged_at DESC LIMIT ? OFFSET ?";
 
   const rows = date
-    ? (db.prepare(baseQuery).all(req.user!.id, buildDayRange(date).start, buildDayRange(date).end) as LogRow[])
-    : (db.prepare(baseQuery).all(req.user!.id) as LogRow[]);
+    ? (db.prepare(baseQuery).all(req.user!.id, buildDayRange(date).start, buildDayRange(date).end, Math.floor(limit)+1,offset) as LogRow[])
+    : (db.prepare(baseQuery).all(req.user!.id, Math.floor(limit)+1,offset) as LogRow[]);
 
-  const logs = rows.map((row) => mapLogRow(row));
+  const hasMore = rows.length > limit;
+  const logs = rows.slice(0,limit).map((row) => mapLogRow(row,compact));
 
   const summary = logs.reduce(
     (acc, item) => {
@@ -115,7 +122,19 @@ logsRouter.get("/", requireAuth, async (req, res) => {
     { calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 },
   );
 
-  res.json({ logs, summary });
+  res.json({ logs, summary, hasMore, nextOffset: hasMore ? offset + logs.length : null });
+});
+
+logsRouter.get('/:id/image', requireAuth, (req,res) => {
+  const row = db.prepare('SELECT user_id,visibility,image_uri FROM food_logs WHERE id=?').get(String(req.params.id)) as {user_id:string;visibility:string;image_uri:string|null}|undefined;
+  const friend = row && db.prepare('SELECT 1 FROM friendships WHERE (user_a_id=? AND user_b_id=?) OR (user_a_id=? AND user_b_id=?)').get(req.user!.id,row.user_id,row.user_id,req.user!.id);
+  if (!row || !(row.user_id === req.user!.id || row.visibility === 'PUBLIC' || row.visibility === 'FRIENDS' && friend)) { res.status(404).json({message:'图片不存在'}); return; }
+  storeImage(String(req.params.id),row.image_uri);
+  const stored = db.prepare('SELECT mime,data,thumbnail FROM food_images WHERE log_id=?').get(String(req.params.id)) as {mime:string;data:Uint8Array;thumbnail:Uint8Array|null}|undefined;
+  if (stored) { res.setHeader('Cache-Control','private, no-store'); res.type(stored.mime).send(Buffer.from(req.query.size === 'thumb' && stored.thumbnail ? stored.thumbnail : stored.data)); return; }
+  const match = row.image_uri?.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$/);
+  if (!match) { res.status(404).json({message:'图片不存在'}); return; }
+  res.setHeader('Cache-Control','private, no-store'); res.type(match[1]!).send(Buffer.from(match[2]!,'base64'));
 });
 
 logsRouter.get("/calendar", requireAuth, async (req, res) => {
@@ -197,7 +216,7 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     loggedAt,
     data.mealType,
     data.note ?? null,
-    data.imageUri ?? null,
+    resolveImage(req.user!.id,data.imageUri),
     data.source,
     data.visibility,
     data.calories,
@@ -216,6 +235,7 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     now,
   );
 
+  storeImage(id,resolveImage(req.user!.id,data.imageUri),data.imageThumbnail);
   const row = db.prepare("SELECT * FROM food_logs WHERE id = ?").get(id) as LogRow;
 
   res.status(201).json({ log: mapLogRow(row) });
@@ -230,9 +250,9 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
   }
 
   const existing = db
-    .prepare("SELECT id, logged_at, ai_provider, ai_model, ai_route FROM food_logs WHERE id = ? AND user_id = ?")
+    .prepare("SELECT id, logged_at, image_uri, ai_provider, ai_model, ai_route FROM food_logs WHERE id = ? AND user_id = ?")
     .get(logId, req.user!.id) as
-    | { id: string; logged_at: string; ai_provider: string | null; ai_model: string | null; ai_route: string | null }
+    | { id: string; logged_at: string; image_uri: string | null; ai_provider: string | null; ai_model: string | null; ai_route: string | null }
     | undefined;
 
   if (!existing) {
@@ -254,7 +274,7 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     loggedAt,
     data.mealType,
     data.note ?? null,
-    data.imageUri ?? null,
+    data.imageUri === undefined ? existing.image_uri : resolveImage(req.user!.id,data.imageUri),
     data.source,
     data.visibility,
     data.calories,
@@ -274,6 +294,7 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     req.user!.id,
   );
 
+  storeImage(logId, data.imageUri ? resolveImage(req.user!.id,data.imageUri) : existing.image_uri, data.imageThumbnail);
   const row = db
     .prepare("SELECT * FROM food_logs WHERE id = ? AND user_id = ?")
     .get(logId, req.user!.id) as LogRow;

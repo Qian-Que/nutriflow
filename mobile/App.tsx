@@ -3,11 +3,14 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { acknowledge, bindStorageSession, enqueue, markPendingError, readCache, readDraft, readPending, subscribePending, updatePending, writeCache, writeDraft, type PendingWrite } from "./offlineStore";
 import { SettingsPanel } from "./SettingsPanel";
+import { RecordImage } from './RecordImage';
+import { runRecognition, clearRecognition } from './recognitionClient';
 import { scaleNutrients } from "./nutritionEditing";
 import { TrendSummary } from "./TrendSummary";
 import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { StatusBar } from "expo-status-bar";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -31,7 +34,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-23-r18";
+const APP_BUILD_LABEL = "2026-10-23-r19";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -926,12 +929,36 @@ function isUnauthorizedError(error: unknown) {
   );
 }
 
+const readsInFlight = new Map<string, Promise<unknown>>();
 async function apiRequest<T>(path: string, init: RequestInit = {}, token?: string, options?: { timeoutMs?: number }): Promise<T> {
+  const operations: Record<string,string> = { '/api/nutrition/analyze-text':'food-text','/api/nutrition/analyze-image':'food-image','/api/exercises/analyze':'exercise-text','/api/exercises/analyze-image':'exercise-image','/api/classifier/analyze':'classify' };
+  if (token && init.method === 'POST' && operations[path]) {
+    const result = await runRecognition<any>(rawApiRequest, token, operations[path], JSON.parse(String(init.body)));
+    if (result.fallback === 'TEXT_ONLY') result.analysis.notes = `仅按文字估算，图片未识别。${result.analysis.notes || ''}`;
+    await clearRecognition(token,operations[path]);
+    return result as T;
+  }
+  if (init.method && init.method.toUpperCase() !== 'GET') return cachedApiRequest<T>(path,init,token,options);
+  const key = `${runtimeApiBaseUrl}:${token}:${path}`;
+  const previous = readsInFlight.get(key);
+  if (previous) return previous as Promise<T>;
+  const pending = cachedApiRequest<T>(path,init,token,options).finally(() => readsInFlight.delete(key));
+  readsInFlight.set(key,pending); return pending;
+}
+async function cachedApiRequest<T>(path: string, init: RequestInit = {}, token?: string, options?: { timeoutMs?: number }): Promise<T> {
   const cacheable = token && (!init.method || init.method === "GET") && /^\/api\/(logs|exercises|weights|profile)(\/|\?|$)/.test(path);
   try {
-    const result = await rawApiRequest<T>(path, init, token, options);
+    const compact = (!init.method || init.method === 'GET') && (/^\/api\/logs(\?|$)/.test(path) || path.startsWith('/api/feed/friends'));
+    const transportPath = compact ? `${path}${path.includes('?') ? '&' : '?'}compact=1` : path;
+    const result = await rawApiRequest<any>(transportPath, init, token, options);
+    if (compact && Array.isArray(result.logs)) {
+      while (result.hasMore) {
+        const page = await rawApiRequest<any>(`${transportPath}&offset=${result.nextOffset}`, init, token, options);
+        result.logs.push(...page.logs); result.hasMore = page.hasMore; result.nextOffset = page.nextOffset;
+      }
+    }
     if (cacheable) void writeCache(token, path, result).catch(() => {});
-    return result;
+    return result as T;
   } catch (error) {
     if (cacheable && isAmbiguousWriteError(error)) {
       const cached = await readCache<T>(token, path);
@@ -951,7 +978,6 @@ async function rawApiRequest<T>(
   if (!preferredBaseUrl) {
     throw new ApiRequestError("接口地址未配置");
   }
-  const cloudDefaultBaseUrl = normalizeBaseUrl(DEFAULT_API_BASE_URL);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -966,14 +992,6 @@ async function rawApiRequest<T>(
   const shouldRetry = method === "GET" || method === "HEAD";
   const maxAttempts = shouldRetry ? 2 : 1;
   const candidateBaseUrls = [preferredBaseUrl];
-  if (
-    cloudDefaultBaseUrl &&
-    cloudDefaultBaseUrl !== preferredBaseUrl &&
-    isLikelyLocalBaseUrl(preferredBaseUrl) &&
-    !isLikelyLocalBaseUrl(cloudDefaultBaseUrl)
-  ) {
-    candidateBaseUrls.push(cloudDefaultBaseUrl);
-  }
 
   let lastNetworkError: unknown;
   for (let index = 0; index < candidateBaseUrls.length; index += 1) {
@@ -2282,6 +2300,8 @@ function DashboardScreen({
   const [loading, setLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayDateString());
+  const currentDateRef = useRef(selectedDate);
+  currentDateRef.current = selectedDate;
   const logs = useMemo(() => {
     const items = new Map(savedLogs.filter(log => !log.id.startsWith('pending-') && toLogDate(log.loggedAt) === selectedDate).map(log => [log.clientRequestId || log.id, log]));
     for (const entry of pending) {
@@ -2321,6 +2341,7 @@ function DashboardScreen({
   const [conversationImageUri, setConversationImageUri] = useState<string | null>(null);
   const [conversationImageBase64, setConversationImageBase64] = useState<string | null>(null);
   const [conversationImageMimeType, setConversationImageMimeType] = useState('image/jpeg');
+  const [conversationThumbnail, setConversationThumbnail] = useState<string | undefined>();
   const [conversationVisibility, setConversationVisibility] = useState<Visibility>('PRIVATE');
   const [detailLogId, setDetailLogId] = useState<string | null>(null);
   const [detailExerciseId, setDetailExerciseId] = useState<string | null>(null);
@@ -2430,12 +2451,18 @@ function DashboardScreen({
       return;
     }
 
-    setConversationImageUri(asset.uri);
-    setConversationImageBase64(asset.base64);
-    setConversationImageMimeType(asset.mimeType ?? 'image/jpeg');
+    try {
+      const resized = await manipulateAsync(asset.uri, asset.width > 1280 || asset.height > 1280 ? [{ resize: asset.width >= asset.height ? { width: 1280 } : { height: 1280 } }] : [], { compress: 0.8, format: SaveFormat.JPEG, base64: true });
+      const small = await manipulateAsync(resized.uri,[{resize:resized.width>=resized.height?{width:320}:{height:320}}],{compress:0.65,format:SaveFormat.JPEG,base64:true});
+      setConversationImageUri(resized.uri);
+      setConversationImageBase64(resized.base64!);
+      setConversationImageMimeType('image/jpeg');
+      setConversationThumbnail(`data:image/jpeg;base64,${small.base64}`);
+    } catch { Alert.alert('图片处理失败','请重新选择一张图片'); }
   }, []);
 
   const clearConversationImage = useCallback(() => {
+    setConversationThumbnail(undefined);
     setConversationImageUri(null);
     setConversationImageBase64(null);
     setConversationImageMimeType('image/jpeg');
@@ -2495,7 +2522,9 @@ function DashboardScreen({
   }, []);
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
+    if (selectedDate !== currentDateRef.current) return;
     const requestId = ++loadRequestRef.current;
+    setPreviousDayNetCalories(null);
     if (!options?.silent) setLoading(true);
     const foodPath = `/api/logs?date=${selectedDate}`;
     const exercisePath = `/api/exercises?date=${selectedDate}`;
@@ -2504,7 +2533,7 @@ function DashboardScreen({
         readCache<{ logs: FoodLog[] }>(token, foodPath),
         readCache<{ exercises: ExerciseLog[] }>(token, exercisePath),
       ]);
-      if (requestId !== loadRequestRef.current) return;
+      if (requestId !== loadRequestRef.current || selectedDate !== currentDateRef.current) return;
       if (!options?.silent && cachedFood) setLogs(cachedFood.logs);
       if (!options?.silent && cachedExercise) setExercises(cachedExercise.exercises);
       if (cachedFood || cachedExercise) setLoading(false);
@@ -2514,7 +2543,7 @@ function DashboardScreen({
         apiRequest<{ profile: NonNullable<typeof dailyTarget>; _offline?: boolean }>('/api/profile/targets', {}, token, { timeoutMs: 8000 }),
       ]);
       const [food, exercise, target] = results;
-      if (requestId !== loadRequestRef.current) return;
+      if (requestId !== loadRequestRef.current || selectedDate !== currentDateRef.current) return;
       if (results.some(result => result.status === 'rejected' && isUnauthorizedError(result.reason))) { onAuthInvalid(); return; }
       if (food.status === 'fulfilled') setLogs(food.value.logs);
       if (exercise.status === 'fulfilled') setExercises(exercise.value.exercises);
@@ -2526,7 +2555,13 @@ function DashboardScreen({
         ...(exercise.status === 'fulfilled' ? exercise.value.exercises.map(log => log.clientRequestId) : []),
       ]);
       await updatePending(token, entries => entries.filter(entry => !entry.serverRecord || !known.has(entry.id)));
-      setPreviousDayNetCalories(null);
+      const previousDate = shiftDateString(selectedDate,-1);
+      const [previousFood,previousExercise] = await Promise.all([
+        apiRequest<{logs:FoodLog[]}>(`/api/logs?date=${previousDate}`,{},token,{timeoutMs:8000}),
+        apiRequest<{exercises:ExerciseLog[]}>(`/api/exercises?date=${previousDate}`,{},token,{timeoutMs:8000}),
+      ]);
+      if (requestId === loadRequestRef.current) setPreviousDayNetCalories(previousFood.logs.length || previousExercise.exercises.length ?
+        previousFood.logs.reduce((sum,item)=>sum+item.calories,0) - previousExercise.exercises.reduce((sum,item)=>sum+item.calories,0) : null);
     } catch {
       if (requestId === loadRequestRef.current && !options?.silent) setSyncMessage('暂时无法连接，已保留本地记录和草稿');
     } finally { if (requestId === loadRequestRef.current) setLoading(false); }
@@ -2919,7 +2954,7 @@ function DashboardScreen({
     setConversationLoading(true);
     setRecognitionStage(entryMode === 'AUTO' ? '判断记录类型' : entryMode === 'FOOD' ? '识别饮食' : '识别运动');
     try {
-      const description = currentInput.slice(0, 1200);
+      const description = currentInput.slice(0, 1000);
       const persistExerciseAnalysis = async (analysisRaw: ExerciseAnalysis, notePrefix?: string) => {
         const analysis = normalizeExerciseAnalysis(analysisRaw);
         const noteParts = [notePrefix?.trim(), analysis.notes?.trim()].filter(Boolean);
@@ -2971,151 +3006,20 @@ function DashboardScreen({
         void Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
       };
 
-      if (entryMode === 'AUTO') try {
-        const classificationPayload = await apiRequest<{ classification: EntryClassification }>(
-          "/api/classifier/analyze",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              description: description || undefined,
-              imageBase64: conversationImageBase64 ?? undefined,
-              mimeType: hasImage ? conversationImageMimeType : undefined,
-            }),
-          },
-          token,
-          { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
-        );
-        intendedEntryKind = normalizeEntryClassification(classificationPayload.classification).kind;
-      } catch (classificationError) {
-        if (isUnauthorizedError(classificationError)) {
-          throw classificationError;
-        }
-        intendedEntryKind = isExerciseIntent(description) ? "EXERCISE" : "UNKNOWN";
-      }
-
-      const shouldTreatAsExercise =
-        intendedEntryKind === "EXERCISE" || (intendedEntryKind === "UNKNOWN" && isExerciseIntent(description));
-      setRecognitionStage(shouldTreatAsExercise ? '识别运动' : '识别饮食');
-
-      if (!hasImage && shouldTreatAsExercise) {
-        const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
-          '/api/exercises/analyze',
-          {
-            method: 'POST',
-            body: JSON.stringify({ description }),
-          },
-          token,
-          { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
-        );
-        await persistExerciseAnalysis(exercisePayload.analysis, description);
+      const result = await runRecognition<{ kind: EntryKind; analysis: NutritionAnalysis | ExerciseAnalysis; fallback?: string }>(
+        rawApiRequest, token, 'entry',
+        { mode: entryMode, description: description || undefined, imageBase64: conversationImageBase64 ?? undefined, mimeType: conversationImageMimeType },
+        setRecognitionStage,
+      );
+      intendedEntryKind = result.kind;
+      if (result.kind === 'EXERCISE') {
+        await persistExerciseAnalysis(result.analysis as ExerciseAnalysis, description);
+        await clearRecognition(token, 'entry').catch(() => setSyncMessage('记录已保存，识别缓存待清理'));
         return;
       }
-
-      if (hasImage && intendedEntryKind !== "FOOD") {
-        try {
-          const exercisePayload = await apiRequest<{ analysis: ExerciseAnalysis }>(
-            '/api/exercises/analyze-image',
-            {
-              method: 'POST',
-              body: JSON.stringify({
-                imageBase64: conversationImageBase64,
-                mimeType: conversationImageMimeType,
-                description: description || undefined,
-              }),
-            },
-            token,
-            { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 90000) },
-          );
-          await persistExerciseAnalysis(exercisePayload.analysis, description || '运动截图');
-          return;
-        } catch (exerciseImageError) {
-          if (isUnauthorizedError(exerciseImageError)) {
-            throw exerciseImageError;
-          }
-
-          const explicitlyNotExercise =
-            exerciseImageError instanceof ApiRequestError &&
-            exerciseImageError.status === 422 &&
-            /(不是运动记录|运动信息不足|非运动记录)/.test(exerciseImageError.message);
-
-          if (shouldTreatAsExercise && !explicitlyNotExercise) {
-            throw exerciseImageError;
-          }
-        }
-      }
-
-      let usedTextFallback = false;
-      setRecognitionStage('识别饮食');
-      let usedLocalFallback = false;
-      let payload: { analysis: NutritionAnalysis };
-
-      if (hasImage) {
-        try {
-          payload = await apiRequest<{ analysis: NutritionAnalysis }>(
-            '/api/nutrition/analyze-image',
-            {
-              method: 'POST',
-              body: JSON.stringify({
-                imageBase64: conversationImageBase64,
-                mimeType: conversationImageMimeType,
-                description: description || undefined,
-              }),
-            },
-            token,
-            { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 85000) },
-          );
-        } catch (imageError) {
-          if (isUnauthorizedError(imageError)) {
-            throw imageError;
-          }
-          if (!currentInput) {
-            throw imageError;
-          }
-          try {
-            payload = await apiRequest<{ analysis: NutritionAnalysis }>(
-              '/api/nutrition/analyze-text',
-              {
-                method: 'POST',
-                body: JSON.stringify({ description: currentInput }),
-              },
-              token,
-              { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
-            );
-            usedTextFallback = true;
-          } catch (textError) {
-            if (isUnauthorizedError(textError)) {
-              throw textError;
-            }
-            payload = { analysis: estimateFromDescription(currentInput || description, true) };
-            usedTextFallback = true;
-            usedLocalFallback = true;
-          }
-        }
-      } else {
-        try {
-          payload = await apiRequest<{ analysis: NutritionAnalysis }>(
-            '/api/nutrition/analyze-text',
-            {
-              method: 'POST',
-              body: JSON.stringify({ description }),
-            },
-            token,
-            { timeoutMs: Math.min(ANALYZE_REQUEST_TIMEOUT_MS, 70000) },
-          );
-        } catch (textError) {
-          if (isUnauthorizedError(textError)) {
-            throw textError;
-          }
-          if (!currentInput && !description) {
-            throw textError;
-          }
-          if (!isTimeoutLikeError(textError)) {
-            throw textError;
-          }
-          payload = { analysis: estimateFromDescription(currentInput || description, false) };
-          usedLocalFallback = true;
-        }
-      }
+      const usedTextFallback = result.fallback === 'TEXT_ONLY';
+      const usedLocalFallback = false;
+      const payload = { analysis: result.analysis as NutritionAnalysis };
 
       const analysis = normalizeClientAnalysis(payload.analysis);
       const normalized = buildPersistedNutritionFromAnalysis(analysis);
@@ -3140,6 +3044,7 @@ function DashboardScreen({
         source: 'AI' as const,
         visibility: conversationVisibility,
         imageUri: conversationImageBase64 ? `data:${conversationImageMimeType};base64,${conversationImageBase64}` : undefined,
+        imageThumbnail: conversationThumbnail,
         note,
         calories: normalized.calories,
         proteinGram: normalized.proteinGram,
@@ -3190,6 +3095,7 @@ function DashboardScreen({
       await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
       setConversationInput('');
       clearConversationImage();
+      await clearRecognition(token, 'entry').catch(() => setSyncMessage('记录已保存，识别缓存待清理'));
       void Promise.all([load({ silent: true }), loadCalendar({ silent: true })]);
     } catch (error) {
       if (isUnauthorizedError(error)) {
@@ -3210,6 +3116,7 @@ function DashboardScreen({
     }
   }, [
     entryMode,
+    conversationThumbnail,
     clearConversationImage,
     conversationImageBase64,
     conversationImageMimeType,
@@ -3222,21 +3129,23 @@ function DashboardScreen({
     selectedDate,
     token,
   ]);
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    void loadCalendar();
-  }, [loadCalendar]);
-
-  useEffect(() => {
-    const sync = () => { void syncPendingWrites(token).then(() => load({ silent: true })).catch(() => setSyncMessage('暂未同步，将在网络恢复后继续')); };
-    sync();
-    const timer = setInterval(sync, 30000);
-    const subscription = AppState.addEventListener('change', state => { if (state === 'active') sync(); });
-    return () => { clearInterval(timer); subscription.remove(); };
-  }, [token, load]);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void load(); void loadCalendar();
+    const sync = async () => {
+      if (!active || AppState.currentState !== 'active') return;
+      try {
+        const entries = await readPending(token);
+        if (!entries.some(entry => !entry.error && !entry.serverRecord)) return;
+        await syncPendingWrites(token);
+        if (active) { void load({silent:true}); void loadCalendar({silent:true}); }
+      } catch { if (active) setSyncMessage('暂未同步，将在网络恢复后继续'); }
+    };
+    void sync();
+    const timer = setInterval(() => void sync(), 30000);
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') { void load({silent:true}); void loadCalendar({silent:true}); void sync(); } });
+    return () => { active = false; clearInterval(timer); subscription.remove(); };
+  }, [token, load, loadCalendar]));
 
   useEffect(() => {
     setSelectedMonth(toMonthString(selectedDate));
@@ -3499,7 +3408,7 @@ function DashboardScreen({
           <ScrollView contentContainerStyle={styles.logDetailScrollContent}>
             <View style={[styles.logDetailCard, themedJournal.surface]}>
               <View style={styles.logDetailTop}>
-                {detailLog.imageUri ? <Image source={{ uri: detailLog.imageUri }} style={styles.logDetailImage} /> : null}
+                {detailLog.imageUri ? <RecordImage uri={detailLog.imageUri.replace('?size=thumb','')} token={token} baseUrl={normalizeBaseUrl(runtimeApiBaseUrl)} style={styles.logDetailImage} /> : null}
                 <View style={styles.logDetailTopContent}>
                   <Text style={[styles.logDetailTitle, themedJournal.text]}>{summarizeFoodFromLog(detailLog)}</Text>
                   <Text style={[styles.logDetailSubtitle, themedJournal.mutedText]}>{detailLog.note || '无补充描述'}</Text>
@@ -3795,7 +3704,7 @@ function DashboardScreen({
                   }}
                 >
                   <View style={styles.journalEntryTop}>
-                    {log.imageUri ? <Image source={{ uri: log.imageUri }} style={styles.journalEntryImage} /> : null}
+                    {log.imageUri ? <RecordImage uri={log.imageUri} token={token} baseUrl={normalizeBaseUrl(runtimeApiBaseUrl)} style={styles.journalEntryImage} /> : null}
                     <View style={styles.journalEntryTextWrap}>
                       <Text style={[styles.journalEntryTitle, themedJournal.text]}>{summarizeFoodFromLog(log)}</Text>
                       <Text style={[styles.hint, themed.hint]}>{formatMealType(log.mealType)} · {log.id.startsWith('pending-') ? '待同步' : '已保存'} · {log.aiProvider === 'local' || /本地估算|图片未成功解析/.test(log.note ?? '') ? '本地估算，待确认' : log.source === 'AI' ? 'AI 估算' : '手动记录'}</Text>
@@ -3886,6 +3795,7 @@ function DashboardScreen({
             value={conversationInput}
             editable={!conversationLoading}
             accessibilityLabel='记录内容'
+            maxLength={1000}
             onChangeText={setConversationInput}
             placeholder={entryMode === 'EXERCISE' ? '例如：跑步 30 分钟' : entryMode === 'FOOD' ? '例如：一碗米饭和鸡胸肉' : '记录这一餐或一次运动'}
             placeholderTextColor={journalTheme.placeholder}
@@ -5874,9 +5784,7 @@ function AppContent() {
         const savedApi = normalizeBaseUrl(await AsyncStorage.getItem(API_BASE_URL_STORAGE_KEY));
         const legacySavedApi = normalizeBaseUrl(await AsyncStorage.getItem(LEGACY_API_BASE_URL_STORAGE_KEY));
         const rawSavedApi = savedApi || legacySavedApi;
-        const shouldPreferCloudDefault =
-          !!rawSavedApi && isLikelyLocalBaseUrl(rawSavedApi) && !isLikelyLocalBaseUrl(DEFAULT_API_BASE_URL);
-        const appliedApi = shouldPreferCloudDefault ? DEFAULT_API_BASE_URL : rawSavedApi || DEFAULT_API_BASE_URL;
+        const appliedApi = rawSavedApi || DEFAULT_API_BASE_URL;
 
         runtimeApiBaseUrl = appliedApi;
         setApiBaseUrl(appliedApi);

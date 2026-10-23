@@ -2,6 +2,7 @@
 
 import { db } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
+import { compactImage } from '../lib/logImages';
 
 export const feedRouter = Router();
 
@@ -51,7 +52,7 @@ feedRouter.get("/friends", requireAuth, async (req, res) => {
       loggedAt: row.logged_at,
       mealType: row.meal_type,
       note: row.note,
-      imageUri: row.image_uri,
+      imageUri: compactImage(row.id,row.image_uri,req.query.compact === '1'),
       source: row.source,
       visibility: row.visibility,
       calories: row.calories,

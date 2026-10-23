@@ -1,6 +1,8 @@
 ﻿import { config } from "../config";
 
 import { getAIConfig } from "../lib/aiSettings";
+import { publicAIError } from '../lib/aiErrors';
+import { aiSignal } from '../lib/aiBudget';
 import { GEMINI_MAX_OUTPUT_TOKENS, GeminiResponseError, extractGeminiText, parseGeminiResponseBody } from "./geminiResponse";
 
 export type NutritionItem = {
@@ -505,12 +507,12 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
   try {
     const response = await fetch(url, {
       ...init,
-      signal: controller.signal,
+      signal: aiSignal(controller.signal),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`AI 接口调用失败（${response.status}）：${errorText}`);
+      throw new Error(`AI 接口调用失败（${response.status}）`);
     }
 
     const body = await response.text();
@@ -1195,7 +1197,7 @@ async function withBackupFallback<T>(
       return result;
     } catch (error) {
       primaryError = error instanceof Error ? error : new Error(String(error));
-      console.warn(`[ai] ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${primaryError.message}`);
+      console.warn(`[ai] ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${publicAIError(primaryError).message}`);
     }
   }
 
@@ -1206,7 +1208,7 @@ async function withBackupFallback<T>(
       return result;
     } catch (error) {
       const backupError = error instanceof Error ? error : new Error(String(error));
-      console.warn(`[ai] ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${backupError.message}`);
+      console.warn(`[ai] ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${publicAIError(backupError).message}`);
       if (primaryError) {
         const primaryLabel = primary?.label ?? "主线路";
         throw new Error(`${primaryLabel}失败：${primaryError.message}；${backup.label}失败：${backupError.message}`);

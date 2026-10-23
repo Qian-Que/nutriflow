@@ -1,6 +1,8 @@
 import { config } from "../config";
 
 import { getAIConfig } from "../lib/aiSettings";
+import { publicAIError } from '../lib/aiErrors';
+import { aiSignal } from '../lib/aiBudget';
 import { GEMINI_MAX_OUTPUT_TOKENS, GeminiResponseError, extractGeminiText, parseGeminiResponseBody } from "./geminiResponse";
 
 export type ExerciseIntensity = "LOW" | "MODERATE" | "HIGH";
@@ -225,10 +227,10 @@ async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: n
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const safeUrl = maskSensitiveUrl(url);
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: aiSignal(controller.signal) });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`AI API request failed (${response.status}): ${text}`);
+      throw new Error(`AI API request failed (${response.status})`);
     }
     const body = await response.text();
     return gemini ? parseGeminiResponseBody(body) : parseJsonOrStreamPayload(body);
@@ -506,7 +508,7 @@ async function withBackupFallback(
       return result;
     } catch (error) {
       primaryError = error instanceof Error ? error : new Error(String(error));
-      console.warn(`[ai] ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${primaryError.message}`);
+      console.warn(`[ai] ${primary.label} failed provider=${primary.provider} model=${primary.model}: ${publicAIError(primaryError).message}`);
     }
   }
 
@@ -517,7 +519,7 @@ async function withBackupFallback(
       return result;
     } catch (error) {
       const backupError = error instanceof Error ? error : new Error(String(error));
-      console.warn(`[ai] ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${backupError.message}`);
+      console.warn(`[ai] ${backup.label} failed provider=${backup.provider} model=${backup.model}: ${publicAIError(backupError).message}`);
       throw new Error(
         primaryError
           ? `${primary?.label ?? "主线路"}失败：${primaryError.message}；${backup.label}失败：${backupError.message}`

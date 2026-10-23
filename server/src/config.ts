@@ -2,6 +2,11 @@
 
 dotenv.config();
 
+if ((process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT_ID) &&
+    (!process.env.JWT_SECRET?.trim() || process.env.JWT_SECRET === 'dev-secret-change-me')) {
+  throw new Error('Production requires an explicit JWT_SECRET');
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
   jwtSecret: process.env.JWT_SECRET ?? "dev-secret-change-me",
