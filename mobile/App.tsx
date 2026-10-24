@@ -47,7 +47,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-24-r23";
+const APP_BUILD_LABEL = "2026-10-24-r24";
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
@@ -98,59 +98,59 @@ const journalThemeTokens: Record<
   }
 > = {
   day: {
-    background: "#F5F5F7",
+    background: "#F6F6F8",
     surface: "#ffffff",
-    surfaceAlt: "#EBEBEF",
-    surfaceSoft: "#F0F0F3",
-    border: "#DADAE2",
-    borderStrong: "#B8B9C5",
+    surfaceAlt: "#EEEFF1",
+    surfaceSoft: "#F3F3F5",
+    border: "#E1E3E7",
+    borderStrong: "#CDD1D7",
     input: "#ffffff",
-    text: "#24252C",
-    textMuted: "#626471",
-    textSoft: "#454754",
-    activeText: "#2749B4",
-    accent: "#315AD9",
-    button: "#315AD9",
-    accentSoft: "#E7ECFF",
-    chartTrack: "#E4E4EB",
-    calorie: "#D76350",
-    carbs: "#ed6b75",
-    protein: "#59b5df",
-    fat: "#f0cf3b",
-    fiber: "#9983C8",
-    exercise: "#6aa6ff",
-    danger: "#d75b5b",
-    placeholder: "#758190",
+    text: "#34383F",
+    textMuted: "#686F79",
+    textSoft: "#565E69",
+    activeText: "#455C72",
+    accent: "#526A82",
+    button: "#526A82",
+    accentSoft: "#E9EEF2",
+    chartTrack: "#ECEEF0",
+    calorie: "#C49182",
+    carbs: "#CCA0A2",
+    protein: "#94ADBF",
+    fat: "#CDBD95",
+    fiber: "#A9A0BC",
+    exercise: "#8E9EB3",
+    danger: "#B05D66",
+    placeholder: "#858A93",
     tabBar: "#ffffff",
-    tabBorder: "#DADAE2",
+    tabBorder: "#E1E3E7",
     statusBar: "dark",
   },
   night: {
-    background: "#18181D",
-    surface: "#24242C",
-    surfaceAlt: "#1F1F26",
-    surfaceSoft: "#30303A",
-    border: "#3D3D49",
-    borderStrong: "#636374",
-    input: "#202027",
-    text: "#f4f9ff",
-    textMuted: "#a7b2c1",
-    textSoft: "#d0d8e2",
-    activeText: "#f7fbff",
-    accent: "#93AEFF",
-    button: "#315AD9",
-    accentSoft: "#2C3557",
-    chartTrack: "#3A3A45",
-    calorie: "#F49782",
-    carbs: "#f06d76",
-    protein: "#62c3ed",
-    fat: "#f3d845",
-    fiber: "#B19ADC",
-    exercise: "#8ab6ff",
-    danger: "#ff8080",
-    placeholder: "#8f9bb0",
-    tabBar: "#1F1F26",
-    tabBorder: "#3D3D49",
+    background: "#1C1D21",
+    surface: "#27292E",
+    surfaceAlt: "#222429",
+    surfaceSoft: "#303238",
+    border: "#3A3D44",
+    borderStrong: "#50555F",
+    input: "#24262B",
+    text: "#E5E8EC",
+    textMuted: "#A3ABB5",
+    textSoft: "#BEC6D0",
+    activeText: "#E5ECF2",
+    accent: "#A4B8CC",
+    button: "#526A82",
+    accentSoft: "#34404C",
+    chartTrack: "#383C43",
+    calorie: "#D1A698",
+    carbs: "#CAA5AA",
+    protein: "#9CBACB",
+    fat: "#CCBF9D",
+    fiber: "#B7ABC8",
+    exercise: "#A3B1C6",
+    danger: "#D99399",
+    placeholder: "#939CA8",
+    tabBar: "#222429",
+    tabBorder: "#3A3D44",
     statusBar: "light",
   },
 };
@@ -2452,7 +2452,7 @@ function DashboardScreen({
       softText: { color: journalTheme.textSoft },
       activeChip: { backgroundColor: journalTheme.accentSoft, borderColor: journalTheme.accent },
       activeText: { color: journalTheme.activeText },
-      metricPill: { backgroundColor: journalTheme.surfaceSoft, color: journalTheme.text },
+      metricPill: { backgroundColor: 'transparent', color: journalTheme.textSoft },
       actionButton: { backgroundColor: journalTheme.surfaceAlt, borderColor: journalTheme.borderStrong },
     }),
     [journalTheme],
@@ -3507,7 +3507,7 @@ function DashboardScreen({
               return (
                 <Pressable
                   key={cell.date}
-                  style={[styles.journalWeekChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
+                  style={[styles.journalWeekChip, {backgroundColor:'transparent'}, active && themedJournal.activeChip]}
                   onPress={() => setSelectedDate(cell.date)}
                 >
                   <Text style={[styles.journalWeekChipTop, themedJournal.mutedText, active && themedJournal.activeText]}>{cell.weekLabel}</Text>
@@ -5788,9 +5788,9 @@ function AppContent() {
     return (
       <SafeAreaView style={styles.safeCenter}>
         <Image source={require('./assets/splash-icon.png')} style={{width:128,height:128}}/>
-        <Text style={{color:'#24252C',fontSize:24,fontWeight:'700'}}>NutriFlow</Text>
-        <Text style={{color:'#626471',fontSize:14}}>营养日记</Text>
-        <ActivityIndicator size='small' color='#315AD9'/>
+        <Text style={{color:'#34383F',fontSize:24,fontWeight:'700'}}>NutriFlow</Text>
+        <Text style={{color:'#727780',fontSize:14}}>营养日记</Text>
+        <ActivityIndicator size='small' color='#526A82'/>
       </SafeAreaView>
     );
   }
@@ -5805,7 +5805,7 @@ function AppContent() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: "#18181D",
+    backgroundColor: "#1C1D21",
   },
   safeCenter: {
     flex: 1,
@@ -5824,7 +5824,7 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   tabBarIcon: {
-    fontWeight: "800",
+    fontWeight: "600",
     lineHeight: 21,
   },
   authContainer: {
@@ -5834,7 +5834,7 @@ const styles = StyleSheet.create({
   },
   logo: {
     fontSize: 34,
-    fontWeight: "800",
+    fontWeight: "600",
     color: "#f7f9ff",
     marginTop: 8,
   },
@@ -5844,7 +5844,7 @@ const styles = StyleSheet.create({
   },
   modeRow: {
     flexDirection: "row",
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
     borderRadius: 10,
     overflow: "hidden",
     marginBottom: 4,
@@ -5856,7 +5856,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   modeButtonActive: {
-    backgroundColor: "#2C3557",
+    backgroundColor: "#34404C",
   },
   modeText: {
     color: "#9fb0cc",
@@ -5866,21 +5866,21 @@ const styles = StyleSheet.create({
     color: "#f5f8ff",
   },
   input: {
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
     color: "#e8edfb",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#3D3D49",
+    borderColor: "#3A3D44",
     paddingHorizontal: 12,
     paddingVertical: 11,
     marginTop: 8,
   },
   textareaInput: {
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
     color: "#e8edfb",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#3D3D49",
+    borderColor: "#3A3D44",
     paddingHorizontal: 12,
     paddingVertical: 11,
     marginTop: 8,
@@ -5888,7 +5888,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   primaryButton: {
-    backgroundColor: "#315AD9",
+    backgroundColor: "#526A82",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
@@ -5901,7 +5901,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   secondaryButton: {
-    borderColor: "#93AEFF",
+    borderColor: "#A4B8CC",
     borderWidth: 1,
     borderRadius: 10,
     alignItems: "center",
@@ -5916,7 +5916,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   ghostButton: {
-    borderColor: "#3D3D49",
+    borderColor: "#3A3D44",
     borderWidth: 1,
     borderRadius: 10,
     alignItems: "center",
@@ -5942,7 +5942,7 @@ const styles = StyleSheet.create({
   screenTitle: {
     color: "#f4f7ff",
     fontSize: 26,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   dynamicHeaderRow: {
     flexDirection: "row",
@@ -5962,15 +5962,15 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#3D3D49",
-    backgroundColor: "#24242C",
+    borderColor: "#3A3D44",
+    backgroundColor: "#27292E",
     alignItems: "center",
     justifyContent: "center",
   },
   dynamicCircleButtonText: {
     color: "#d5e3ff",
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "600",
     lineHeight: 20,
   },
   dynamicFilterRow: {
@@ -5985,7 +5985,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
   },
   dynamicFilterChipActive: {
     borderColor: "#4f88ff",
@@ -6004,7 +6004,7 @@ const styles = StyleSheet.create({
   },
   dynamicNameLink: {
     color: "#9ec0ff",
-    fontWeight: "800",
+    fontWeight: "600",
     fontSize: 15,
   },
   card: {
@@ -6034,7 +6034,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   dangerText: {
-    color: "#ff8080",
+    color: "#D99399",
   },
   sectionBlock: {
     marginTop: 10,
@@ -6146,7 +6146,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   calendarDayTextActive: {
-    color: "#f7fbff",
+    color: "#E5ECF2",
   },
   calendarCalText: {
     marginTop: 2,
@@ -6166,7 +6166,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     maxHeight: 320,
     borderWidth: 1,
-    borderColor: "#3D3D49",
+    borderColor: "#3A3D44",
     borderRadius: 12,
     padding: 10,
     gap: 8,
@@ -6210,7 +6210,7 @@ const styles = StyleSheet.create({
   },
   journalSafe: {
     flex: 1,
-    backgroundColor: "#18181D",
+    backgroundColor: "#1C1D21",
   },
   journalContainer: {
     flex: 1,
@@ -6253,7 +6253,7 @@ const styles = StyleSheet.create({
   journalDateText: {
     color: "#f5f8ff",
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   journalDateArrow: {
     color: "#9eb0cf",
@@ -6271,11 +6271,11 @@ const styles = StyleSheet.create({
   },
   journalThemeToggleIcon: {
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   journalThemeToggleText: {
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   journalRemainText: {
     marginLeft: "auto",
@@ -6336,7 +6336,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 4,
     paddingHorizontal: 2,
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
   },
   journalCalendarCellActive: {
     borderColor: "#4f88ff",
@@ -6348,7 +6348,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   journalCalendarDayTextActive: {
-    color: "#f7fbff",
+    color: "#E5ECF2",
   },
   journalCalendarCalText: {
     marginTop: 1,
@@ -6365,10 +6365,10 @@ const styles = StyleSheet.create({
   },
   journalWeekChip: {
     minWidth: 42,
-    borderRadius: 10,
-    borderWidth: 1,
+    borderRadius: 8,
+    borderWidth: 0,
     borderColor: "#2f3e57",
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
     paddingHorizontal: 7,
     paddingVertical: 6,
     alignItems: "center",
@@ -6385,7 +6385,7 @@ const styles = StyleSheet.create({
   journalWeekChipBottom: {
     color: "#dce7ff",
     fontSize: 14,
-    fontWeight: "800",
+    fontWeight: "600",
     marginTop: 0,
   },
   journalWeekChipTextActive: {
@@ -6427,8 +6427,8 @@ const styles = StyleSheet.create({
   },
   journalCalorieSegment: {
     position: "absolute",
-    width: 5,
-    height: 14,
+    width: 4,
+    height: 12,
     borderRadius: 999,
   },
   journalCalorieCenter: {
@@ -6444,7 +6444,7 @@ const styles = StyleSheet.create({
   },
   journalCalorieValue: {
     fontSize: 18,
-    fontWeight: "900",
+    fontWeight: "700",
     lineHeight: 21,
   },
   journalCalorieLabel: {
@@ -6459,7 +6459,7 @@ const styles = StyleSheet.create({
   },
   journalRingLegendText: {
     fontSize: 10,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   journalMacroChart: {
     flex: 1,
@@ -6476,11 +6476,11 @@ const styles = StyleSheet.create({
   },
   journalMacroChartLabel: {
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   journalMacroChartValue: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "500",
   },
   journalMacroTrack: {
     height: 8,
@@ -6511,12 +6511,12 @@ const styles = StyleSheet.create({
   },
   journalCalorieMetaText: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "500",
   },
   journalCardTitle: {
     color: "#eaf2ff",
     fontSize: 14,
-    fontWeight: "800",
+    fontWeight: "600",
     marginBottom: 6,
   },
   journalStatGrid: {
@@ -6531,7 +6531,7 @@ const styles = StyleSheet.create({
   journalStatValue: {
     color: "#f6fbff",
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   journalStatLabel: {
     color: "#8ea0bd",
@@ -6549,7 +6549,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 5,
     paddingHorizontal: 7,
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
   },
   journalMacroLabel: {
     color: "#9eb2d4",
@@ -6617,9 +6617,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   journalEntryTitle: {
-    color: "#f4f9ff",
+    color: "#E5E8EC",
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "600",
     lineHeight: 20,
   },
   journalEntryNote: {
@@ -6649,9 +6649,7 @@ const styles = StyleSheet.create({
   journalEntryMetric: {
     color: "#dce9ff",
     fontSize: 11,
-    backgroundColor: "#1a2e4e",
-    borderRadius: 999,
-    paddingHorizontal: 8,
+    paddingRight: 6,
     paddingVertical: 4,
   },
   journalEntryFooter: {
@@ -6777,9 +6775,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   journalEditModalTitle: {
-    color: "#f4f9ff",
+    color: "#E5E8EC",
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   editFooter:{flexDirection:'row',gap:12,paddingTop:12,borderTopWidth:1},
   editFooterButton:{flex:1,minWidth:0,minHeight:48,marginTop:0},
@@ -6820,7 +6818,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#29384f",
     borderRadius: 8,
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
     color: "#e8f0ff",
     paddingHorizontal: 9,
     paddingVertical: 6,
@@ -6837,8 +6835,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   journalSendButtonText: {
-    color: "#f7fbff",
-    fontWeight: "800",
+    color: "#E5ECF2",
+    fontWeight: "600",
     fontSize: 12,
   },
   journalComposerMetaRow: {
@@ -6860,7 +6858,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    backgroundColor: "#24242C",
+    backgroundColor: "#27292E",
   },
   journalVisibilityChipActive: {
     borderColor: "#4f88ff",
@@ -6927,9 +6925,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   logDetailTitle: {
-    color: "#f4f9ff",
+    color: "#E5E8EC",
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "600",
     lineHeight: 24,
   },
   logDetailSubtitle: {
@@ -6972,14 +6970,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   logDetailSummaryValue: {
-    color: "#f4f9ff",
+    color: "#E5E8EC",
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   logDetailSectionTitle: {
-    color: "#f4f9ff",
+    color: "#E5E8EC",
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   logDetailSectionText: {
     color: "#b5c8e6",

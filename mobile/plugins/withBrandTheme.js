@@ -3,8 +3,8 @@ module.exports = function withBrandTheme(config) {
   config = withAndroidColors(config, value => {
     const colors = value.modResults.resources.color ??= [];
     const existing = colors.find(item => item.$.name === 'nutriflow_accent');
-    if (existing) existing._ = '#315AD9';
-    else colors.push({ $: { name: 'nutriflow_accent' }, _: '#315AD9' });
+    if (existing) existing._ = '#526A82';
+    else colors.push({ $: { name: 'nutriflow_accent' }, _: '#526A82' });
     return value;
   });
   return withAndroidStyles(config, value => {
