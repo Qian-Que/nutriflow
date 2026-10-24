@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const os=require('node:os');const {spawnSync}=require('node:child_process');const {DatabaseSync}=require('node:sqlite');
+const directory=fs.mkdtempSync(path.join(os.tmpdir(),'nutriflow-migration-'));
+const file=path.join(directory,'fixture.db');
+const original=new DatabaseSync(file);
+original.exec("CREATE TABLE migration_evidence (value TEXT); INSERT INTO migration_evidence VALUES ('preserved')");original.close();
+const env={...process.env,SQLITE_PATH:file,JWT_SECRET:'migration-test-only'};
+const result=spawnSync(process.execPath,['-e',"require('./dist/lib/recognitionJobs');require('./dist/lib/db').db.close();"],{env,encoding:'utf8'});
+assert.equal(result.status,0,result.stderr);
+const backup=fs.readdirSync(directory).filter(name=>name.endsWith('.bak'));assert.equal(backup.length,1);
+const snapshot=new DatabaseSync(path.join(directory,backup[0]),{readOnly:true});assert.equal(snapshot.prepare('SELECT value FROM migration_evidence').get().value,'preserved');assert(!snapshot.prepare('PRAGMA table_info(recognition_jobs)').all().some(row=>row.name==='context'));snapshot.close();
+const again=spawnSync(process.execPath,['-e',"require('./dist/lib/recognitionJobs');require('./dist/lib/db').db.close();"],{env,encoding:'utf8'});assert.equal(again.status,0,again.stderr);assert.equal(fs.readdirSync(directory).filter(name=>name.endsWith('.bak')).length,1);
+console.log('PASS: pre-migration consistent backup, preserved data, additive schema and idempotent second startup');

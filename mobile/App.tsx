@@ -6,7 +6,10 @@ import { SettingsPanel } from "./SettingsPanel";
 import { RecordImage } from './RecordImage';
 import { runRecognition, clearRecognition } from './recognitionClient';
 import { RecognitionReview } from './RecognitionReview';
-import { REVIEW_CACHE_KEY, reviewBody, type ReviewDraft } from './recognitionDraft';
+import { REVIEW_CACHE_KEY, reviewCacheKey, reviewBody, type ReviewDraft } from './recognitionDraft';
+import { useRecognitionInbox } from './useRecognitionInbox';
+import { RecognitionInbox } from './RecognitionInbox';
+import { UPLOAD_CACHE, matchesUploadDraft, type BackgroundJob, type UploadTicket } from './backgroundRecognition';
 import { AppUpdateNotice, useAppUpdate, type UpdateState } from './AppUpdateNotice';
 import { scaleNutrients } from "./nutritionEditing";
 import { TrendSummary } from "./TrendSummary";
@@ -42,7 +45,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-24-r20";
+const APP_BUILD_LABEL = "2026-10-24-r21";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -2298,8 +2301,10 @@ function DashboardScreen({
   const [favorites, setFavorites] = useState<FoodLog[]>([]);
   const [draftReady, setDraftReady] = useState(false);
   const [review, setReview] = useState<ReviewDraft | null>(null);
+  const [legacyReview, setLegacyReview] = useState<ReviewDraft | null>(null);
   const [reviewReady, setReviewReady] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [reviewSaving, setReviewSaving] = useState(false);
   const savingReviewRef = useRef(false);
   const [imageProcessing, setImageProcessing] = useState(false);
@@ -2323,7 +2328,7 @@ function DashboardScreen({
   const logs = useMemo(() => {
     const items = new Map(savedLogs.filter(log => !log.id.startsWith('pending-') && toLogDate(log.loggedAt) === selectedDate).map(log => [log.clientRequestId || log.id, log]));
     for (const entry of pending) {
-      if (entry.path === '/api/logs' && toLogDate(entry.body.loggedAt) === selectedDate && !items.has(entry.id)) {
+      if ((entry.path === '/api/logs' || (entry.path.endsWith('/confirm') && !entry.body.exerciseType)) && toLogDate(entry.body.loggedAt) === selectedDate && !items.has(entry.id)) {
         items.set(entry.id, (entry.serverRecord ?? { ...entry.body, id: `pending-${entry.id}` }) as FoodLog);
       }
     }
@@ -2333,7 +2338,7 @@ function DashboardScreen({
   const exercises = useMemo(() => {
     const items = new Map(savedExercises.filter(log => !log.id.startsWith('pending-') && toLogDate(log.loggedAt) === selectedDate).map(log => [log.clientRequestId || log.id, log]));
     for (const entry of pending) {
-      if (entry.path === '/api/exercises' && toLogDate(entry.body.loggedAt) === selectedDate && !items.has(entry.id)) items.set(entry.id, (entry.serverRecord ?? { ...entry.body, id: `pending-${entry.id}` }) as ExerciseLog);
+      if ((entry.path === '/api/exercises' || (entry.path.endsWith('/confirm') && entry.body.exerciseType)) && toLogDate(entry.body.loggedAt) === selectedDate && !items.has(entry.id)) items.set(entry.id, (entry.serverRecord ?? { ...entry.body, id: `pending-${entry.id}` }) as ExerciseLog);
     }
     return [...items.values()];
   }, [savedExercises, pending, selectedDate]);
@@ -2390,6 +2395,8 @@ function DashboardScreen({
   const [savingExerciseEdit, setSavingExerciseEdit] = useState(false);
   const themed = useThemedAppStyles();
   const journalTheme = journalThemeTokens[journalThemeMode];
+  const inbox = useRecognitionInbox(rawApiRequest, token);
+  const inboxJobs = inbox.jobs.filter(job => !pending.some(entry => entry.id === `recognition-${job.id}`));
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -2403,11 +2410,19 @@ function DashboardScreen({
       const outbox = await readPending(token);
       if (draft && outbox.some(entry => entry.id === draft.body.clientRequestId)) {
         await writeCache(token, REVIEW_CACHE_KEY, null);
-      } else if (active && draft) setReview(draft);
+      } else if (active && draft) setLegacyReview(draft);
+      if (!draft && !await readCache(token, UPLOAD_CACHE)) {
+        const old = await readCache<{requestId:string;input:UploadTicket['input']}>(token,'recognition:entry');
+        const composer = await readDraft(token);
+        if (old && composer && matchesUploadDraft(composer,{...old,operation:'entry',context:{} as any})) {
+          await writeCache(token,UPLOAD_CACHE,{requestId:old.requestId,operation:'entry',input:old.input,context:{loggedAt:buildLoggedAtForSelectedDate(composer.date),mealType:inferMealTypeForDate(composer.date),visibility:'PRIVATE'}});
+          void inbox.refresh(true);
+        }
+      }
     })().catch(() => { if (active) setSyncMessage('校对草稿读取失败，请检查本机存储'); })
       .finally(() => { if (active) setReviewReady(true); });
     return () => { active = false; };
-  }, [token]);
+  }, [token, inbox.refresh]);
   useFocusEffect(useCallback(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (detailLogId || detailExerciseId) { setDetailLogId(null); setDetailExerciseId(null); return true; }
@@ -2462,7 +2477,7 @@ function DashboardScreen({
   }, [conversationVisibility]);
 
   const pickConversationImage = useCallback(async (mode: 'camera' | 'library') => {
-    if (imageProcessingRef.current || review || conversationLoading) return;
+    if (imageProcessingRef.current || inbox.ticket || conversationLoading) return;
     imageProcessingRef.current = true;
     setImageProcessing(true);
     Keyboard.dismiss();
@@ -2504,7 +2519,7 @@ function DashboardScreen({
       setConversationThumbnail(`data:image/jpeg;base64,${small.base64}`);
     } catch { Alert.alert('未取得照片','可以重试拍照，或从相册选择照片；原有内容已保留'); }
     finally { imageProcessingRef.current = false; setImageProcessing(false); }
-  }, [review, conversationLoading]);
+  }, [inbox.ticket, conversationLoading]);
 
   const clearConversationImage = useCallback(() => {
     setConversationThumbnail(undefined);
@@ -2512,6 +2527,17 @@ function DashboardScreen({
     setConversationImageBase64(null);
     setConversationImageMimeType('image/jpeg');
   }, []);
+
+  const handledUpload = useRef('');
+  useEffect(() => {
+    const uploaded = inbox.acceptedUpload;
+    if (!uploaded || !draftReady || handledUpload.current === uploaded.requestId) return;
+    handledUpload.current = uploaded.requestId;
+    if (matchesUploadDraft({text:conversationInput,imageBase64:conversationImageBase64,mimeType:conversationImageMimeType},uploaded)) {
+      setConversationInput(''); clearConversationImage();
+    }
+    void clearRecognition(token,'entry').catch(() => {});
+  },[inbox.acceptedUpload,draftReady,conversationInput,conversationImageBase64,conversationImageMimeType,clearConversationImage,token]);
 
   useEffect(() => {
     let active = true;
@@ -2980,88 +3006,102 @@ function DashboardScreen({
 
   const changeReview = useCallback((value: ReviewDraft) => {
     setReview(value);
-    void writeCache(token, REVIEW_CACHE_KEY, value).catch(() => setSyncMessage('校对修改尚未存入本机，请检查存储空间'));
+    if (!value.jobId) setLegacyReview(value);
+    void writeCache(token, reviewCacheKey(value.jobId), value).catch(() => setSyncMessage('校对修改尚未存入本机，请检查存储空间'));
   }, [token]);
 
+  const openTaskReview = async (job: BackgroundJob) => {
+    try {
+      const cached = await readCache<ReviewDraft>(token,reviewCacheKey(job.id));
+      let draft = cached;
+      if (!draft) {
+        const result = job.result, context = job.context;
+        if (!result?.analysis || !['FOOD','EXERCISE'].includes(result.kind)) throw new Error('识别结果尚未就绪，请刷新任务');
+        const common = { clientRequestId:'recognition-'+job.id,loggedAt:context.loggedAt,source:'AI',visibility:context.visibility };
+        let body: Record<string,any>, confidence: number;
+        if (result.kind === 'EXERCISE') {
+          const analysis = normalizeExerciseAnalysis(result.analysis);
+          confidence = analysis.confidence;
+          body = {...common,exerciseType:analysis.exerciseType,durationMin:analysis.durationMin,intensity:analysis.intensity,met:analysis.met,calories:analysis.calories,
+            note:[context.description,analysis.notes].filter(Boolean).join('；').slice(0,300),...aiUsageFromAnalysis(analysis)};
+        } else {
+          const analysis = normalizeClientAnalysis(result.analysis);
+          confidence = analysis.confidence;
+          const note = context.description || analysis.items.map(item=>item.name).join('、');
+          body = {...common,...buildPersistedNutritionFromAnalysis(analysis),items:analysis.items,mealType:context.mealType,
+            note:(result.fallback==='TEXT_ONLY'?note.slice(0,270)+'（图片未成功解析，已按文字估算）':note).slice(0,300),
+            imageUri:context.hasImage ? `/api/recognition/jobs/${job.id}/image` : undefined,...aiUsageFromAnalysis(analysis)};
+        }
+        draft = {jobId:job.id,kind:result.kind,body,confidence,fallback:result.fallback,acknowledged:false,timings:job.timings};
+        await writeCache(token,reviewCacheKey(job.id),draft);
+      }
+      setReview({...draft,timings:job.timings}); setInboxOpen(false); setReviewOpen(true);
+    } catch (error) { Alert.alert('无法打开校对',normalizeErrorMessage(error)); }
+  };
+
   const discardReview = useCallback(async () => {
-    if (savingReviewRef.current) return;
+    if (!review || savingReviewRef.current) return;
     savingReviewRef.current = true; setReviewSaving(true);
     try {
-      await clearRecognition(token, 'entry');
-      await writeCache(token, REVIEW_CACHE_KEY, null);
-      setReview(null); setReviewOpen(false);
-    } catch { setSyncMessage('暂时无法清理校对草稿，请重试'); }
+      if (review.jobId) await rawApiRequest(`/api/recognition/jobs/${review.jobId}`,{method:'DELETE'},token);
+      else await clearRecognition(token,'entry');
+      await writeCache(token,reviewCacheKey(review.jobId),null);
+      if (!review.jobId) setLegacyReview(null);
+      setReview(null); setReviewOpen(false); void inbox.refresh();
+    } catch (error) { Alert.alert('暂未放弃结果',normalizeErrorMessage(error)); }
     finally { savingReviewRef.current = false; setReviewSaving(false); }
-  }, [token]);
+  },[review,token,inbox.refresh]);
 
   const saveReview = useCallback(async () => {
     if (!review || savingReviewRef.current) return;
     savingReviewRef.current = true; setReviewSaving(true);
     try {
-      const body = reviewBody(review);
-      const submitted = { ...review, body, submitted: true };
-      await writeCache(token, REVIEW_CACHE_KEY, submitted);
+      const body = {...reviewBody(review),acknowledged:review.acknowledged};
+      const submitted = {...review,body,submitted:true};
+      await writeCache(token,reviewCacheKey(review.jobId),submitted);
       setReview(submitted);
-      const state = await persistWithAmbiguousRecovery(review.kind === 'FOOD' ? '/api/logs' : '/api/exercises', body, token);
-      // The outbox owns the stable request ID from this point, including ambiguous network responses.
+      const path = review.jobId ? `/api/recognition/jobs/${review.jobId}/confirm` : review.kind==='FOOD'?'/api/logs':'/api/exercises';
+      const state = await persistWithAmbiguousRecovery(path,body,token);
       setReview(null); setReviewOpen(false);
-      setConversationInput(''); clearConversationImage();
-      await writeCache(token, REVIEW_CACHE_KEY, null).catch(() => setSyncMessage('记录已保留，校对缓存待清理'));
-      await writeDraft(token, { text: '', imageBase64: null, mimeType: 'image/jpeg', date: selectedDate }).catch(() => setSyncMessage('记录已保留，草稿清理暂未完成'));
-      await clearRecognition(token, 'entry').catch(() => setSyncMessage('记录已保留，识别缓存待清理'));
-      setSyncMessage(state === 'pending' ? '记录已保留在本机，联网后继续同步' : '已确认保存');
-      void load({ silent: true }); void loadCalendar({ silent: true });
+      await writeCache(token,reviewCacheKey(review.jobId),null).catch(()=>setSyncMessage('记录已保留，校对缓存待清理'));
+      if (!review.jobId) setLegacyReview(null);
+      if (!review.jobId) await clearRecognition(token,'entry').catch(()=>{});
+      setSyncMessage(state==='pending'?'记录已保留在本机，联网后继续同步':'已确认保存');
+      void load({silent:true}); void loadCalendar({silent:true}); void inbox.refresh();
     } catch (error) {
       if (isUnauthorizedError(error)) onAuthInvalid();
-      else Alert.alert('尚未完成保存', normalizeErrorMessage(error));
+      else Alert.alert('尚未完成保存',normalizeErrorMessage(error));
     } finally { savingReviewRef.current = false; setReviewSaving(false); }
-  }, [review, token, clearConversationImage, selectedDate, load, loadCalendar, onAuthInvalid]);
+  },[review,token,load,loadCalendar,onAuthInvalid,inbox.refresh]);
 
   const sendConversationMessage = useCallback(async () => {
     if (!draftReady || !reviewReady || conversationLoading || imageProcessing || sendingRef.current) return;
-    if (review) { setReviewOpen(true); return; }
     const description = conversationInput.trim();
     if (!description && !conversationImageBase64) return;
     Keyboard.dismiss();
-    sendingRef.current = true; setConversationLoading(true); setRecognitionStage('保存草稿');
+    sendingRef.current = true; setConversationLoading(true); setRecognitionStage('上传中，请等待确认');
     try {
-      await writeDraft(token, { text: conversationInput, imageBase64: conversationImageBase64, mimeType: conversationImageMimeType, date: selectedDate, entryMode });
-      const result = await runRecognition<{ kind: EntryKind; analysis: NutritionAnalysis | ExerciseAnalysis; fallback?: string }>(
-        rawApiRequest, token, 'entry',
-        { mode: entryMode, description: description || undefined, imageBase64: conversationImageBase64 ?? undefined, mimeType: conversationImageMimeType },
-        setRecognitionStage,
+      await writeDraft(token,{text:conversationInput,imageBase64:conversationImageBase64,mimeType:conversationImageMimeType,date:selectedDate,entryMode});
+      await inbox.submit(
+        {mode:entryMode,description:description || undefined,imageBase64:conversationImageBase64 ?? undefined,mimeType:conversationImageMimeType},
+        {loggedAt:buildLoggedAtForSelectedDate(selectedDate),mealType:inferMealTypeForDate(selectedDate),visibility:conversationVisibility,imageThumbnail:conversationThumbnail},
       );
-      if (result.kind !== 'FOOD' && result.kind !== 'EXERCISE') throw new Error('未能判断记录类型，请选择饮食或运动后重试');
-      const common = {
-        clientRequestId: createConversationMessageId(), loggedAt: buildLoggedAtForSelectedDate(selectedDate),
-        source: 'AI', visibility: conversationVisibility,
-      };
-      let body: Record<string, any>, confidence: number;
-      if (result.kind === 'EXERCISE') {
-        const analysis = normalizeExerciseAnalysis(result.analysis as ExerciseAnalysis);
-        confidence = analysis.confidence;
-        body = { ...common, exerciseType: analysis.exerciseType, durationMin: analysis.durationMin, intensity: analysis.intensity,
-          met: analysis.met, calories: analysis.calories, note: [description, analysis.notes].filter(Boolean).join('；').slice(0, 300), ...aiUsageFromAnalysis(analysis) };
-      } else {
-        const analysis = normalizeClientAnalysis(result.analysis as NutritionAnalysis);
-        confidence = analysis.confidence;
-        const note = description || analysis.items.map(item => item.name).join('、');
-        body = { ...common, ...buildPersistedNutritionFromAnalysis(analysis), items: analysis.items,
-          mealType: inferMealTypeForDate(selectedDate), note: (result.fallback === 'TEXT_ONLY' ? note.slice(0, 270) + '（图片未成功解析，已按文字估算）' : note).slice(0, 300),
-          imageUri: conversationImageBase64 ? `data:${conversationImageMimeType};base64,${conversationImageBase64}` : undefined,
-          imageThumbnail: conversationThumbnail, ...aiUsageFromAnalysis(analysis) };
-      }
-      const draft: ReviewDraft = { kind: result.kind, body, confidence, fallback: result.fallback, acknowledged: false };
-      await writeCache(token, REVIEW_CACHE_KEY, draft);
-      setReview(draft); setReviewOpen(true);
+      setSyncMessage('已上传，可以离开；结果会进入待校对列表');
     } catch (error) {
       if (isUnauthorizedError(error)) onAuthInvalid();
-      else Alert.alert('暂未取得校对结果', normalizeErrorMessage(error));
-    } finally { sendingRef.current = false; setConversationLoading(false); }
-  }, [draftReady, reviewReady, review, imageProcessing, conversationLoading, entryMode, conversationThumbnail, conversationImageBase64, conversationImageMimeType, conversationInput, conversationVisibility, onAuthInvalid, selectedDate, token]);
+      else { setInboxOpen(true); Alert.alert('上传尚未确认',normalizeErrorMessage(error)); }
+    } finally { sendingRef.current=false;setConversationLoading(false); }
+  },[draftReady,reviewReady,conversationLoading,imageProcessing,entryMode,conversationThumbnail,conversationImageBase64,conversationImageMimeType,conversationInput,conversationVisibility,onAuthInvalid,selectedDate,token,inbox.submit]);
+  const taskAction = async (job: BackgroundJob, action: 'retry'|'discard') => {
+    try {
+      await rawApiRequest(`/api/recognition/jobs/${job.id}${action==='retry'?'/retry':''}`,{method:action==='retry'?'POST':'DELETE',...(action==='retry'?{body:JSON.stringify({expectedAttempt:job.attempts})}:{})},token);
+      if (action==='discard') await writeCache(token,reviewCacheKey(job.id),null);
+      await inbox.refresh();
+    } catch (error) { Alert.alert('任务操作未完成',normalizeErrorMessage(error)); }
+  };
   useFocusEffect(useCallback(() => {
     let active = true;
-    void load(); void loadCalendar();
+    void load(); void loadCalendar(); void inbox.refresh(true);
     const sync = async () => {
       if (!active || AppState.currentState !== 'active') return;
       try {
@@ -3075,7 +3115,7 @@ function DashboardScreen({
     const timer = setInterval(() => void sync(), 30000);
     const subscription = AppState.addEventListener('change', state => { if (state === 'active') { void load({silent:true}); void loadCalendar({silent:true}); void sync(); } });
     return () => { active = false; clearInterval(timer); subscription.remove(); };
-  }, [token, load, loadCalendar]));
+  }, [token, load, loadCalendar, inbox.refresh]));
 
   useEffect(() => {
     setSelectedMonth(toMonthString(selectedDate));
@@ -3694,14 +3734,17 @@ function DashboardScreen({
           })}
         </ScrollView>
 
-        {review && <Pressable accessibilityRole='button' accessibilityLabel='继续校对识别结果' onPress={() => setReviewOpen(true)} style={{ padding: 10, gap: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: journalTheme.accentSoft }}>
+        {(inboxJobs.length > 0 || inbox.ticket) && !keyboardVisible && <Pressable accessibilityRole='button' accessibilityLabel='打开识别任务' onPress={() => {setInboxOpen(true);void inbox.refresh();}} style={{minHeight:44,padding:10,gap:8,flexDirection:'row',alignItems:'center',backgroundColor:journalTheme.accentSoft}}>
+          <Ionicons name='albums-outline' size={20} color={journalTheme.accent}/><Text style={{flex:1,color:journalTheme.text}}>识别任务 · {inboxJobs.filter(job=>job.status==='completed').length} 待校对 · {inboxJobs.filter(job=>['queued','running'].includes(job.status)).length} 处理中{inboxJobs.some(job=>job.status==='failed')?` · ${inboxJobs.filter(job=>job.status==='failed').length} 失败`:''}{inbox.ticket?' · 上传待确认':''}</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent}/>
+        </Pressable>}
+        {legacyReview && <Pressable accessibilityRole='button' accessibilityLabel='继续校对识别结果' onPress={() => {setReview(legacyReview);setReviewOpen(true);}} style={{ padding: 10, gap: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: journalTheme.accentSoft }}>
           <Ionicons name='create-outline' size={20} color={journalTheme.accent} /><Text style={{ flex: 1, color: journalTheme.text }}>1 条识别结果待确认</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent} />
         </Pressable>}
         {imageProcessing && <ActivityIndicator accessibilityLabel='正在处理照片' color={journalTheme.accent} />}
         {conversationImageUri && !keyboardVisible ? (
           <View style={styles.journalPendingImageWrap}>
             <Image source={{ uri: conversationImageUri }} style={styles.journalPendingImage} />
-            <Pressable disabled={conversationLoading || imageProcessing || Boolean(review)} style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
+            <Pressable disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)} style={[styles.journalPendingRemove, themedJournal.actionButton]} onPress={clearConversationImage}>
               <Text style={[styles.journalPendingRemoveText, themedJournal.text]}>移除图片</Text>
             </Pressable>
           </View>
@@ -3709,7 +3752,7 @@ function DashboardScreen({
 
         <View style={[styles.composerModeRow, { borderTopColor: journalTheme.border }]}>
           {([{ value: 'AUTO', label: '自动', icon: 'sparkles-outline' }, { value: 'FOOD', label: '饮食', icon: 'restaurant-outline' }, { value: 'EXERCISE', label: '运动', icon: 'fitness-outline' }] as const).map(option => (
-            <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading || imageProcessing || Boolean(review)}
+            <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)}
               onPress={() => setEntryMode(option.value)} style={[styles.composerMode, { backgroundColor: entryMode === option.value ? journalTheme.accentSoft : journalTheme.surfaceAlt }]}>
               <Ionicons name={option.icon} size={16} color={entryMode === option.value ? journalTheme.accent : journalTheme.textMuted} />
               <Text style={{ fontSize: 12, fontWeight: '600', color: entryMode === option.value ? journalTheme.activeText : journalTheme.textMuted }}>{option.label}</Text>
@@ -3718,20 +3761,20 @@ function DashboardScreen({
         </View>
         {conversationLoading && <View style={styles.recognitionProgress} accessibilityLiveRegion='polite'>
           <ActivityIndicator size='small' color={journalTheme.accent} />
-          <Text style={{ flex: 1, fontSize: 12, color: journalTheme.text }}>{recognitionStage}{recognitionSeconds >= 20 && recognitionStage !== '保存记录' ? ' · 等待模型响应' : ''}</Text>
+          <Text style={{ flex: 1, fontSize: 12, color: journalTheme.text }}>{recognitionStage}</Text>
           <Text style={{ fontSize: 12, color: journalTheme.textMuted }}>{recognitionSeconds} 秒</Text>
         </View>}
         <View style={styles.journalComposerRow}>
-          <Pressable accessibilityLabel='选择照片' disabled={conversationLoading || imageProcessing || Boolean(review)} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
+          <Pressable accessibilityLabel='选择照片' disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('library')}>
             <Ionicons name='image-outline' size={21} color={journalTheme.textSoft} />
           </Pressable>
-          <Pressable accessibilityLabel='拍照' disabled={conversationLoading || imageProcessing || Boolean(review)} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
+          <Pressable accessibilityLabel='拍照' disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)} style={[styles.journalMediaButton, themedJournal.surface]} onPress={() => void pickConversationImage('camera')}>
             <Ionicons name='camera-outline' size={21} color={journalTheme.textSoft} />
           </Pressable>
           <TextInput
             style={[styles.journalInput, themedJournal.input]}
             value={conversationInput}
-            editable={!conversationLoading && !imageProcessing && !review}
+            editable={!conversationLoading && !imageProcessing && !inbox.ticket}
             accessibilityLabel='记录内容'
             maxLength={1000}
             onChangeText={setConversationInput}
@@ -3742,8 +3785,8 @@ function DashboardScreen({
           <Pressable
             style={[styles.journalSendButton, { backgroundColor: conversationLoading ? journalTheme.borderStrong : journalTheme.accent }]}
             onPress={() => void sendConversationMessage()}
-            disabled={conversationLoading || imageProcessing || !draftReady || !reviewReady || (!review && !conversationInput.trim() && !conversationImageBase64)}
-            accessibilityLabel={review ? '打开待校对结果' : '发送记录'}
+            disabled={conversationLoading || imageProcessing || !draftReady || !reviewReady || (!conversationInput.trim() && !conversationImageBase64)}
+            accessibilityLabel='发送记录'
           >
             <Ionicons name={conversationLoading ? 'hourglass-outline' : 'arrow-up'} size={22} color={journalThemeMode === 'night' ? '#142019' : '#ffffff'} />
           </Pressable>
@@ -3757,7 +3800,7 @@ function DashboardScreen({
               return (
                 <Pressable
                   key={option.value}
-                  disabled={conversationLoading || imageProcessing || Boolean(review)}
+                  disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)}
                   style={[styles.journalVisibilityChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
                   onPress={() => setConversationVisibility(option.value)}
                 >
@@ -3946,6 +3989,7 @@ function DashboardScreen({
           </KeyboardAvoidingView>
         </Modal>
         {review && reviewOpen && <RecognitionReview draft={review} theme={journalTheme} busy={reviewSaving} onChange={changeReview} onClose={() => setReviewOpen(false)} onDiscard={() => void discardReview()} onSave={() => void saveReview()} />}
+        {inboxOpen && <RecognitionInbox jobs={inboxJobs} ticket={inbox.ticket} busy={inbox.busy} message={inbox.message} theme={journalTheme} baseUrl={runtimeApiBaseUrl} token={token} onClose={()=>setInboxOpen(false)} onOpen={job=>void openTaskReview(job)} onRetry={job=>void taskAction(job,'retry')} onDiscard={job=>Alert.alert('放弃识别任务','这会删除待校对结果和任务图片，不影响已保存记录。',[{text:'取消',style:'cancel'},{text:'放弃',style:'destructive',onPress:()=>void taskAction(job,'discard')}])} onRetryUpload={()=>{void inbox.retryUpload().catch(error=>Alert.alert('上传尚未确认',normalizeErrorMessage(error)));}} onCancelUpload={()=>{void inbox.cancelUpload().catch(error=>Alert.alert('暂未取消',normalizeErrorMessage(error)));}} onRefresh={()=>void inbox.refresh(true)}/>}
       </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

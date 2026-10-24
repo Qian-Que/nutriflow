@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { TimingDetails } from './RecognitionInbox';
 import { changeReviewItem, needsReviewAcknowledgement, nutrientFields, reviewBody, scaleReview, removeReviewItem, type ReviewDraft } from './recognitionDraft';
 
 type Theme = { background: string; surface: string; border: string; text: string; textMuted: string; accent: string; input: string; accentSoft: string; danger: string };
@@ -28,6 +29,7 @@ export function RecognitionReview({ draft, theme, busy, onChange, onClose, onDis
           <Pressable accessibilityLabel='暂存并关闭校对' disabled={busy} onPress={onClose} style={styles.icon}><Ionicons name='close-outline' size={24} color={theme.text} /></Pressable>
         </View>
         <ScrollView keyboardShouldPersistTaps='handled' keyboardDismissMode='on-drag' contentContainerStyle={styles.content}>
+          {draft.timings && <TimingDetails timings={draft.timings} color={theme.textMuted}/>}
           {needsReviewAcknowledgement(draft) && <View style={[styles.warning, { borderColor: theme.danger }]}>
             <Ionicons name='alert-circle-outline' size={20} color={theme.danger} />
             <Text style={[text, { flex: 1, lineHeight: 22 }]}>{draft.fallback === 'TEXT_ONLY' ? '图片未解析成功，本次仅按文字估算。' : '本次识别把握较低，请核对名称和份量。'}</Text>
@@ -63,7 +65,7 @@ export function RecognitionReview({ draft, theme, busy, onChange, onClose, onDis
           {needsReviewAcknowledgement(draft) && <Pressable accessibilityRole='checkbox' accessibilityLabel='已核对不确定的识别结果' aria-checked={draft.acknowledged} accessibilityState={{ checked: draft.acknowledged }} disabled={locked} onPress={() => change({ ...draft, acknowledged: !draft.acknowledged })} style={styles.check}>
             <Ionicons name={draft.acknowledged ? 'checkbox' : 'square-outline'} size={24} color={theme.accent} /><Text style={[text, { flex: 1 }]}>已核对不确定的识别结果</Text>
           </Pressable>}
-          <Pressable disabled={locked} accessibilityLabel='放弃本次识别结果' onPress={onDiscard} style={styles.check}><Ionicons name='trash-outline' size={20} color={theme.danger} /><Text style={{ color: theme.danger }}>放弃结果，返回修改描述</Text></Pressable>
+          <Pressable disabled={locked} accessibilityLabel='放弃本次识别结果' onPress={onDiscard} style={styles.check}><Ionicons name='trash-outline' size={20} color={theme.danger} /><Text style={{ color: theme.danger }}>{draft.jobId ? '放弃这条结果' : '放弃结果，返回修改描述'}</Text></Pressable>
         </ScrollView>
         <View style={[styles.footer, { borderColor: theme.border, backgroundColor: theme.surface }]}>
           {!!error && <Text accessibilityRole='alert' style={{ color: theme.danger, marginBottom: 8 }}>{error}</Text>}

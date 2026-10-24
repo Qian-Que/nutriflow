@@ -1,4 +1,4 @@
-export const CURRENT_VERSION = '1.4.0';
+export const CURRENT_VERSION = '1.5.0';
 export type AppRelease = { version: string; url: string; apkUrl: string; size: number; publishedAt: string };
 export function isNewerVersion(next: string, current: string) {
   if (!/^\d+\.\d+\.\d+$/.test(next) || !/^\d+\.\d+\.\d+$/.test(current)) return false;

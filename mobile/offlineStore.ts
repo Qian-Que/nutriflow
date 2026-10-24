@@ -60,6 +60,10 @@ export function enqueue(token: string, path: string, body: Record<string, any>) 
 export function acknowledge(token: string, id: string, serverRecord: Record<string, any>) { return updatePending(token, entries => entries.map(entry => entry.id === id ? { ...entry, serverRecord, error: undefined } : entry)); }
 export function markPendingError(token: string, id: string, error: string) { return updatePending(token, entries => entries.map(entry => entry.id === id ? { ...entry, error } : entry)); }
 export function writeCache(token: string, name: string, data: unknown) { const key = `${scope(token)}:cache:${name}`; return serial(key, () => writeText(key, JSON.stringify(data))); }
+export function updateCache<T>(token: string, name: string, update: (current: T | null) => T | null) {
+  const key = `${scope(token)}:cache:${name}`;
+  return serial(key, async () => { const value = update(await readCache<T>(token, name)); await writeText(key, JSON.stringify(value)); return value; });
+}
 export async function readCache<T>(token: string, name: string): Promise<T | null> { return JSON.parse(await readText(`${scope(token)}:cache:${name}`) ?? "null"); }
 
 export function writeDraft(token: string, draft: Draft) {

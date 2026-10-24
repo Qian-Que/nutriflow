@@ -1,4 +1,5 @@
 import { scaleNutrients } from './nutritionEditing';
+import type { JobTimings } from './backgroundRecognition';
 
 export const REVIEW_CACHE_KEY = 'recognition-review-v1';
 export const nutrientFields = [
@@ -9,7 +10,10 @@ export type ReviewDraft = {
   kind: 'FOOD' | 'EXERCISE'; body: Record<string, any>; confidence: number;
   fallback?: string; acknowledged: boolean; submitted?: boolean;
   weightBases?: Record<number, Record<string, any>>;
+  jobId?: string;
+  timings?: JobTimings;
 };
+export const reviewCacheKey = (jobId?: string) => jobId ? `recognition-review:${jobId}` : REVIEW_CACHE_KEY;
 export function needsReviewAcknowledgement(draft: ReviewDraft) {
   return draft.fallback === 'TEXT_ONLY' || !Number.isFinite(draft.confidence) || draft.confidence < 0.7;
 }

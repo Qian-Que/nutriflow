@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { HttpError } from '../middleware/error';
 
 import { createId, db, nowIso } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
@@ -182,21 +183,19 @@ logsRouter.get("/calendar", requireAuth, async (req, res) => {
   res.json({ month, days });
 });
 
-logsRouter.post("/", requireAuth, async (req, res) => {
-  const parsed = createLogSchema.safeParse(req.body);
+export function createFoodRecord(userId: string, payload: unknown, compact = false) {
+  const parsed = createLogSchema.safeParse(payload);
   if (!parsed.success) {
-    res.status(400).json({ message: parsed.error.issues[0]?.message ?? "饮食记录参数不合法" });
-    return;
+    throw new HttpError(400, parsed.error.issues[0]?.message ?? "饮食记录参数不合法");
   }
 
   const data = parsed.data;
   if (data.clientRequestId) {
     const existing = db
       .prepare("SELECT * FROM food_logs WHERE user_id = ? AND client_request_id = ?")
-      .get(req.user!.id, data.clientRequestId) as LogRow | undefined;
+      .get(userId, data.clientRequestId) as LogRow | undefined;
     if (existing) {
-      res.json({ log: mapLogRow(existing), deduplicated: true });
-      return;
+      return { log: mapLogRow(existing, compact), deduplicated: true };
     }
   }
   const id = createId();
@@ -211,12 +210,12 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
-    req.user!.id,
+    userId,
     data.clientRequestId ?? null,
     loggedAt,
     data.mealType,
     data.note ?? null,
-    resolveImage(req.user!.id,data.imageUri),
+    resolveImage(userId,data.imageUri),
     data.source,
     data.visibility,
     data.calories,
@@ -235,10 +234,15 @@ logsRouter.post("/", requireAuth, async (req, res) => {
     now,
   );
 
-  storeImage(id,resolveImage(req.user!.id,data.imageUri),data.imageThumbnail);
+  storeImage(id,resolveImage(userId,data.imageUri),data.imageThumbnail);
   const row = db.prepare("SELECT * FROM food_logs WHERE id = ?").get(id) as LogRow;
 
-  res.status(201).json({ log: mapLogRow(row) });
+  return { log: mapLogRow(row, compact), deduplicated: false };
+}
+
+logsRouter.post("/", requireAuth, (req, res) => {
+  const result = createFoodRecord(req.user!.id, req.body);
+  res.status(result.deduplicated ? 200 : 201).json(result);
 });
 
 logsRouter.put("/:id", requireAuth, async (req, res) => {

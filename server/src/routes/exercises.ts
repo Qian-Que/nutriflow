@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { HttpError } from '../middleware/error';
 
 import { createId, db, nowIso } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
@@ -137,27 +138,25 @@ exercisesRouter.post("/analyze-image", requireAuth, async (req, res) => {
   }
 });
 
-exercisesRouter.post("/", requireAuth, async (req, res) => {
-  const parsed = createExerciseLogSchema.safeParse(req.body);
+export function createExerciseRecord(userId: string, payload: unknown) {
+  const parsed = createExerciseLogSchema.safeParse(payload);
   if (!parsed.success) {
-    res.status(400).json({ message: parsed.error.issues[0]?.message ?? "运动记录参数不合法" });
-    return;
+    throw new HttpError(400, parsed.error.issues[0]?.message ?? "运动记录参数不合法");
   }
 
   const data = parsed.data;
   if (data.clientRequestId) {
     const existing = db
       .prepare("SELECT * FROM exercise_logs WHERE user_id = ? AND client_request_id = ?")
-      .get(req.user!.id, data.clientRequestId) as ExerciseRow | undefined;
+      .get(userId, data.clientRequestId) as ExerciseRow | undefined;
     if (existing) {
-      res.json({ exercise: mapExerciseRow(existing), deduplicated: true });
-      return;
+      return { exercise: mapExerciseRow(existing), deduplicated: true };
     }
   }
   const id = createId();
   const now = nowIso();
   const loggedAt = data.loggedAt ? new Date(data.loggedAt).toISOString() : now;
-  const weightKg = getCurrentWeightKg(req.user!.id);
+  const weightKg = getCurrentWeightKg(userId);
   const calories = data.calories > 0 ? data.calories : estimateExerciseCalories(data.met, weightKg, data.durationMin);
 
   db.prepare(
@@ -167,7 +166,7 @@ exercisesRouter.post("/", requireAuth, async (req, res) => {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
-    req.user!.id,
+    userId,
     data.clientRequestId ?? null,
     loggedAt,
     data.exerciseType,
@@ -186,7 +185,12 @@ exercisesRouter.post("/", requireAuth, async (req, res) => {
   );
 
   const row = db.prepare("SELECT * FROM exercise_logs WHERE id = ?").get(id) as ExerciseRow;
-  res.status(201).json({ exercise: mapExerciseRow(row) });
+  return { exercise: mapExerciseRow(row), deduplicated: false };
+}
+
+exercisesRouter.post("/", requireAuth, (req, res) => {
+  const result = createExerciseRecord(req.user!.id, req.body);
+  res.status(result.deduplicated ? 200 : 201).json(result);
 });
 
 exercisesRouter.put("/:id", requireAuth, async (req, res) => {
