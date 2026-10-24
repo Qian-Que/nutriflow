@@ -28,7 +28,7 @@ export function useAppUpdate(request: Request, server: string) {
       }
       setChecking(true); if (manual) setMessage('');
       try {
-        const next = validateRelease(await request('/api/releases/latest', {}, undefined, { timeoutMs: 7000 }));
+        const next = validateRelease(await request('/api/releases/latest?format=2', {}, undefined, { timeoutMs: 7000 }));
         if (!active.current) return;
         setRelease(next);
         setMessage(isNewerVersion(next.version, CURRENT_VERSION) ? `新版本 v${next.version}` : '当前已是最新版本');

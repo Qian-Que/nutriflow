@@ -325,15 +325,7 @@ try {
   if ($LASTEXITCODE -ne 0) {
     $rawText = ($installOutput | Out-String)
     if ($rawText -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
-      Write-Host "Signature mismatch detected. Uninstall old app then reinstall..." -ForegroundColor Yellow
-      $null = & adb -s $targetDevice uninstall $packageName
-      if ($LASTEXITCODE -ne 0) {
-        throw "Auto uninstall failed. Please uninstall manually and retry. Package: $packageName"
-      }
-      $null = & adb -s $targetDevice install $apkPath
-      if ($LASTEXITCODE -ne 0) {
-        throw "Install failed after uninstall."
-      }
+      throw "Signature mismatch. Existing app and data were preserved. Rebuild with the original signing key; do not uninstall to bypass this check. Package: $packageName"
     } else {
       throw "Install failed.`n$rawText"
     }

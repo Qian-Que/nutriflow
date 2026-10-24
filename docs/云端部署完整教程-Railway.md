@@ -33,7 +33,7 @@ npm run build
 
 1. 进入 Railway，点击 `New Project`。
 2. 选择 `GitHub Repository`。
-3. 选中仓库：`Qian-Que/nutrition-app`。
+3. 选中仓库：`Qian-Que/nutriflow`。
 4. 进入服务设置，把 `Root Directory` 设为：
 - `server`
 5. 若使用 Nixpacks/Railpack（非 Dockerfile），在 Variables 里增加：

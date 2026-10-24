@@ -45,7 +45,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-24-r21";
+const APP_BUILD_LABEL = "2026-10-24-r22";
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -2157,8 +2157,8 @@ function AuthScreen({
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.authContainer}>
-        <Text style={styles.logo}>饮食营养助手</Text>
-        <Text style={styles.subtitle}>饮食记录与营养控制</Text>
+        <Text style={styles.logo}>NutriFlow</Text>
+        <Text style={styles.subtitle}>营养日记</Text>
 
         <View style={styles.modeRow}>
           <Pressable

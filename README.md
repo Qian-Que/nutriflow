@@ -1,4 +1,4 @@
-﻿# 饮食营养助手 NutriFlow
+﻿# NutriFlow · 营养日记
 
 React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记录应用。当前版本重点是：图片/文字 AI 识别、饮食和运动自动分类、每日目标营养、体重追踪、好友动态、记录可见范围、云端后端独立使用。
 
@@ -14,20 +14,29 @@ React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记�
 
 ## 当前版本与下载
 
-- Android 版本：**1.5.0**（`versionCode: 8`）。
-- 移动端构建标识：`2026-10-24-r21`。
-- [v1.5.0 发布说明](https://github.com/Qian-Que/nutrition-app/releases/tag/v1.5.0)
-- [下载 Android APK](https://github.com/Qian-Que/nutrition-app/releases/download/v1.5.0/NutriFlow-v1.5.0-android.apk)
+- Android 版本：**1.5.1**（`versionCode: 9`）。
+- 移动端构建标识：`2026-10-24-r22`。
+- [v1.5.1 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.5.1)
+- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.5.1/NutriFlow-v1.5.1-android.apk)
 - 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
 - 此次发布不改变主备 AI 配置；测速功能不会发布草稿，也不代表第三方模型已通过真实图片测试。
 
 APK SHA-256：
 
 ```text
-a843853d9f636ffc0106deed5ff9e84e51d2110de0096966bf0402cf75d037a9
+fa1073efa9e9048476bb68cf3e4469949aec3eb226c090e152d777162236a3d9
 ```
 
 近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
+
+### 1.5.1 名称统一与更新兼容
+
+- 产品名称统一为 **NutriFlow**，中文副标题为 **营养日记**，GitHub 仓库改为 `Qian-Que/nutriflow`。
+- Android 桌面名称、登录页、Web 标题与发布资料统一；保留包名 `com.qianque1.nutritionassistantcn`、签名、Expo 项目标识和本地存储键，支持覆盖安装。
+- 新版更新检查使用 `/api/releases/latest?format=2` 返回新仓库地址；无参数接口保留旧版认可的链接，由 GitHub 重定向到新仓库，避免 1.4.0/1.5.0 无法升级。新客户端也兼容并规范化已有的更新缓存。
+- 请勿重新创建名为 `nutrition-app` 的仓库，否则 GitHub 的旧地址重定向会失效，参见 [GitHub 仓库改名说明](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository)。
+- Railway 公网地址和 AI 配置保持不变。本地目录 `E:\AI\healthydiet` 保持原路径，避免影响工作区和构建配置；目录名不是产品展示名称。
+- 打包安装脚本遇到签名不匹配时停止，不再自动卸载旧应用，以保护用户数据。
 
 ### 1.5.0 上传后后台识别
 
@@ -102,7 +111,7 @@ Android 1.4.0 APK 已通过签名校验、模拟器覆盖安装、登录、输�
 - 移动端源码：`E:\AI\healthydiet\mobile`
 - 后端源码：`E:\AI\healthydiet\server`
 - 当前 Android 打包目录：`E:\AI\healthydiet\mobile`；`E:\mobile_clean\mobile` 是历史镜像，不作为当前发布来源。
-- GitHub：`https://github.com/Qian-Que/nutrition-app.git`
+- GitHub：`https://github.com/Qian-Que/nutriflow.git`
 
 ### 当前线上后端
 
@@ -201,7 +210,7 @@ https://strong-amazement-production-c91d.up.railway.app
 
 Railway 设置：
 
-- Source Repo：`Qian-Que/nutrition-app`
+- Source Repo：`Qian-Que/nutriflow`
 - Branch：`main`
 - Root Directory：`server`
 - Start Command：`npm run start`

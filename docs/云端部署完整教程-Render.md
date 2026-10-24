@@ -23,7 +23,7 @@ git init
 git add .
 git commit -m "init nutriflow"
 git branch -M main
-git remote add origin <https://github.com/Qian-Que/nutrition-app.git>
+git remote add origin <https://github.com/Qian-Que/nutriflow.git>
 git push -u origin main
 ```
 

@@ -33,7 +33,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "nutrition-server", release: "2026-10-24-r21", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
+  res.json({ ok: true, service: "nutrition-server", release: "2026-10-24-r22", revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null });
 });
 
 app.use("/api/auth", authLimit, authRouter);
