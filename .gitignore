@@ -9,4 +9,5 @@ mobile_git_backup_*
 server/tmp_*
 .playwright-cli/
 output/playwright/
+output/npm-cache/
 mobile/dist-web/

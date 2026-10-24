@@ -6,7 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-type Theme = { background: string; surface: string; border: string; text: string; textMuted: string; accent: string; input: string; accentSoft: string; activeText: string };
+type Theme = { background: string; surface: string; border: string; text: string; textMuted: string; accent: string; button:string; input: string; accentSoft: string; activeText: string };
 type Request = <T>(path: string, init?: RequestInit, token?: string, options?: { timeoutMs?: number }) => Promise<T>;
 type Settings = {
   aiProvider: string; aiBaseUrl: string; aiModel: string; aiApiKey?: string; aiImageDetail: string; aiTimeoutMs: number;
@@ -136,7 +136,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
           <View style={styles.row}>
             <Pressable disabled={busy} onPress={() => void action('test')} style={button}><Ionicons name='pulse-outline' size={18} color={theme.accent} /><Text style={text}>测试主线路</Text></Pressable>
             {backup && <Pressable disabled={busy} onPress={() => void action('testBackup')} style={button}><Ionicons name='pulse-outline' size={18} color={theme.accent} /><Text style={text}>测试备用线路</Text></Pressable>}
-            <Pressable disabled={busy} onPress={() => Alert.alert('发布全局配置', '保存后，所有用户的新识别请求将使用此配置。', [{ text: '取消', style: 'cancel' }, { text: '保存生效', onPress: () => void action('save') }])} style={[button, { backgroundColor: theme.accent }]}><Ionicons name='save-outline' size={18} color='#ffffff' /><Text style={{ color: '#ffffff' }}>保存生效</Text></Pressable>
+            <Pressable disabled={busy} onPress={() => Alert.alert('发布全局配置', '保存后，所有用户的新识别请求将使用此配置。', [{ text: '取消', style: 'cancel' }, { text: '保存生效', onPress: () => void action('save') }])} style={[button, { backgroundColor: theme.button }]}><Ionicons name='save-outline' size={18} color='#ffffff' /><Text style={{ color: '#ffffff' }}>保存生效</Text></Pressable>
           </View>
           <Pressable disabled={busy} onPress={() => Alert.alert('恢复环境配置', '将移除在线配置，恢复服务器中设置的主、备用模型。', [{ text: '取消', style: 'cancel' }, { text: '恢复', onPress: () => void action('reset') }])} style={button}><Ionicons name='arrow-undo-outline' size={18} color={theme.accent} /><Text style={text}>恢复环境配置</Text></Pressable>
         </View>}

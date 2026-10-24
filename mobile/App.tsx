@@ -9,6 +9,8 @@ import { RecognitionReview } from './RecognitionReview';
 import { REVIEW_CACHE_KEY, reviewCacheKey, reviewBody, type ReviewDraft } from './recognitionDraft';
 import { useRecognitionInbox } from './useRecognitionInbox';
 import { RecognitionInbox } from './RecognitionInbox';
+import { RecordActions } from './RecordActions';
+import * as SplashScreen from 'expo-splash-screen';
 import { UPLOAD_CACHE, matchesUploadDraft, type BackgroundJob, type UploadTicket } from './backgroundRecognition';
 import { AppUpdateNotice, useAppUpdate, type UpdateState } from './AppUpdateNotice';
 import { scaleNutrients } from "./nutritionEditing";
@@ -45,7 +47,8 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-24-r22";
+const APP_BUILD_LABEL = "2026-10-24-r23";
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
 const parsedAnalyzeTimeoutMs = Number(process.env.EXPO_PUBLIC_ANALYZE_TIMEOUT_MS ?? 140000);
@@ -78,6 +81,7 @@ const journalThemeTokens: Record<
     textSoft: string;
     activeText: string;
     accent: string;
+    button: string;
     accentSoft: string;
     chartTrack: string;
     calorie: string;
@@ -94,57 +98,59 @@ const journalThemeTokens: Record<
   }
 > = {
   day: {
-    background: "#f2f4f7",
+    background: "#F5F5F7",
     surface: "#ffffff",
-    surfaceAlt: "#e9edf2",
-    surfaceSoft: "#edf1f6",
-    border: "#dce1e8",
-    borderStrong: "#b8c2cf",
+    surfaceAlt: "#EBEBEF",
+    surfaceSoft: "#F0F0F3",
+    border: "#DADAE2",
+    borderStrong: "#B8B9C5",
     input: "#ffffff",
-    text: "#20262d",
-    textMuted: "#5e6b7a",
-    textSoft: "#465360",
-    activeText: "#164f36",
-    accent: "#26734f",
-    accentSoft: "#dcefe3",
-    chartTrack: "#e5eae7",
-    calorie: "#26734f",
+    text: "#24252C",
+    textMuted: "#626471",
+    textSoft: "#454754",
+    activeText: "#2749B4",
+    accent: "#315AD9",
+    button: "#315AD9",
+    accentSoft: "#E7ECFF",
+    chartTrack: "#E4E4EB",
+    calorie: "#D76350",
     carbs: "#ed6b75",
     protein: "#59b5df",
     fat: "#f0cf3b",
-    fiber: "#56b880",
+    fiber: "#9983C8",
     exercise: "#6aa6ff",
     danger: "#d75b5b",
     placeholder: "#758190",
     tabBar: "#ffffff",
-    tabBorder: "#cdd8d1",
+    tabBorder: "#DADAE2",
     statusBar: "dark",
   },
   night: {
-    background: "#141619",
-    surface: "#22262b",
-    surfaceAlt: "#1c1f24",
-    surfaceSoft: "#2b3037",
-    border: "#39414b",
-    borderStrong: "#596572",
-    input: "#1b1e23",
+    background: "#18181D",
+    surface: "#24242C",
+    surfaceAlt: "#1F1F26",
+    surfaceSoft: "#30303A",
+    border: "#3D3D49",
+    borderStrong: "#636374",
+    input: "#202027",
     text: "#f4f9ff",
     textMuted: "#a7b2c1",
     textSoft: "#d0d8e2",
     activeText: "#f7fbff",
-    accent: "#65b98b",
-    accentSoft: "#284c38",
-    chartTrack: "#3a443f",
-    calorie: "#65b98b",
+    accent: "#93AEFF",
+    button: "#315AD9",
+    accentSoft: "#2C3557",
+    chartTrack: "#3A3A45",
+    calorie: "#F49782",
     carbs: "#f06d76",
     protein: "#62c3ed",
     fat: "#f3d845",
-    fiber: "#65c68b",
+    fiber: "#B19ADC",
     exercise: "#8ab6ff",
     danger: "#ff8080",
     placeholder: "#8f9bb0",
-    tabBar: "#1c1f24",
-    tabBorder: "#39414b",
+    tabBar: "#1F1F26",
+    tabBorder: "#3D3D49",
     statusBar: "light",
   },
 };
@@ -171,7 +177,7 @@ function useThemedAppStyles() {
       sectionTitle: { color: theme.textMuted },
       input: { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
       textareaInput: { backgroundColor: theme.input, borderColor: theme.border, color: theme.text },
-      primaryButton: { backgroundColor: theme.accent },
+      primaryButton: { backgroundColor: theme.button },
       ghostButton: { backgroundColor: theme.surfaceAlt, borderColor: theme.borderStrong },
       ghostButtonText: { color: theme.textSoft },
       secondaryButton: { borderColor: theme.accent },
@@ -2157,6 +2163,7 @@ function AuthScreen({
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.authContainer}>
+        <Image source={require('./assets/icon.png')} accessibilityLabel='NutriFlow 标志' style={{width:64,height:64,borderRadius:12}}/>
         <Text style={styles.logo}>NutriFlow</Text>
         <Text style={styles.subtitle}>营养日记</Text>
 
@@ -2305,6 +2312,7 @@ function DashboardScreen({
   const [reviewReady, setReviewReady] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [actionRecord,setActionRecord] = useState<{kind:'food';log:FoodLog}|{kind:'exercise';exercise:ExerciseLog}|null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const savingReviewRef = useRef(false);
   const [imageProcessing, setImageProcessing] = useState(false);
@@ -2698,7 +2706,7 @@ function DashboardScreen({
             method: 'DELETE',
           },
           token,
-        );
+        ).catch(error=>{if(!(error instanceof ApiRequestError && error.status===404))throw error;});
         if (detailLogId === log.id) {
           setDetailLogId(null);
         }
@@ -2711,31 +2719,10 @@ function DashboardScreen({
           onAuthInvalid();
           return;
         }
-        Alert.alert('删除失败', normalizeErrorMessage(error));
+        throw new Error(normalizeErrorMessage(error));
       }
     },
     [detailLogId, editLogId, load, loadCalendar, onAuthInvalid, resetEditState, token],
-  );
-
-  const openLogMoreActions = useCallback(
-    (log: FoodLog) => {
-      const summaryText = summarizeFoodFromLog(log);
-      Alert.alert('更多操作', summaryText || '请选择操作', [
-        { text: '取消', style: 'cancel' },
-        { text: '编辑条目', onPress: () => openEditLogModal(log) },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('确认删除', '删除后无法恢复，确定要删除这条记录吗？', [
-              { text: '取消', style: 'cancel' },
-              { text: '删除', style: 'destructive', onPress: () => void deleteLogRecord(log) },
-            ]);
-          },
-        },
-      ]);
-    },
-    [deleteLogRecord, openEditLogModal],
   );
 
   const openEditExerciseModal = useCallback((exercise: ExerciseLog) => {
@@ -2770,7 +2757,7 @@ function DashboardScreen({
             method: 'DELETE',
           },
           token,
-        );
+        ).catch(error=>{if(!(error instanceof ApiRequestError && error.status===404))throw error;});
         if (editExerciseId === exercise.id) {
           resetExerciseEditState();
         }
@@ -2783,31 +2770,19 @@ function DashboardScreen({
           onAuthInvalid();
           return;
         }
-        Alert.alert('删除失败', normalizeErrorMessage(error));
+        throw new Error(normalizeErrorMessage(error));
       }
     },
     [detailExerciseId, editExerciseId, load, onAuthInvalid, resetExerciseEditState, token],
   );
 
-  const openExerciseMoreActions = useCallback(
-    (exercise: ExerciseLog) => {
-      Alert.alert('更多操作', exercise.exerciseType || '运动记录', [
-        { text: '取消', style: 'cancel' },
-        { text: '编辑运动', onPress: () => openEditExerciseModal(exercise) },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('确认删除', '删除后无法恢复，确定要删除这条运动记录吗？', [
-              { text: '取消', style: 'cancel' },
-              { text: '删除', style: 'destructive', onPress: () => void deleteExerciseRecord(exercise) },
-            ]);
-          },
-        },
-      ]);
-    },
-    [deleteExerciseRecord, openEditExerciseModal],
-  );
+  const repeatFood = async (log: FoodLog) => {
+    const {id,clientRequestId,...data}=log;
+    const cleaned=Object.fromEntries(Object.entries(data).filter(([,value])=>value!==null&&value!==undefined));
+    const state=await persistWithAmbiguousRecovery('/api/logs',{...cleaned,loggedAt:buildLoggedAtForSelectedDate(selectedDate),clientRequestId:createConversationMessageId()},token);
+    setSyncMessage(state==='pending'?'记录已保留，联网后同步':'已再记一餐');
+    void load({silent:true});void loadCalendar({silent:true});
+  };
 
   const closeEditModal = useCallback(() => {
     if (savingEdit) {
@@ -3654,14 +3629,9 @@ function DashboardScreen({
                   </Pressable>
                   <View style={styles.journalEntryFooter}>
                     <Text style={[styles.journalEntryTime, themedJournal.mutedText]}>{formatClockTime(exercise.loggedAt)}</Text>
-                    <View style={styles.journalEntryActions}>
-                      <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openEditExerciseModal(exercise)}>
-                        <Text style={[styles.journalEntryActionText, themedJournal.text]}>编辑</Text>
-                      </Pressable>
-                      <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openExerciseMoreActions(exercise)}>
-                        <Text style={[styles.journalEntryActionText, themedJournal.text]}>更多</Text>
-                      </Pressable>
-                    </View>
+                    <Pressable accessibilityRole='button' accessibilityLabel={`记录操作：${exercise.exerciseType}`} accessibilityHint='编辑或删除运动记录' onPress={()=>setActionRecord({kind:'exercise',exercise})} style={styles.recordMenuButton}>
+                      <Ionicons name='ellipsis-horizontal' size={22} color={journalTheme.textMuted}/>
+                    </Pressable>
                   </View>
                 </View>
               );
@@ -3707,27 +3677,9 @@ function DashboardScreen({
 
                 <View style={styles.journalEntryFooter}>
                   <Text style={[styles.journalEntryTime, themedJournal.mutedText]}>{formatClockTime(log.loggedAt)}</Text>
-                  <View style={styles.journalEntryActions}>
-                    <Pressable accessibilityLabel={favorites.some(item => item.id === log.id) ? '取消常用餐食' : '收藏为常用餐食'} style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => {
-                      const next = favorites.some(item => item.id === log.id) ? favorites.filter(item => item.id !== log.id) : [...favorites, log].slice(-20);
-                      setFavorites(next); void writeCache(token, 'favorites', next).catch(() => setSyncMessage('常用餐食保存失败'));
-                    }}><Ionicons name={favorites.some(item => item.id === log.id) ? 'star' : 'star-outline'} size={16} color={journalTheme.accent} /></Pressable>
-                    <Pressable accessibilityLabel='再记一次' disabled={conversationLoading || log.id.startsWith('pending-')} style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => {
-                      Alert.alert('再记一次', `将这份餐食记录到 ${selectedDate}，份量沿用原记录。`, [{ text: '取消', style: 'cancel' }, { text: '确认记录', onPress: () => {
-                        setConversationLoading(true);
-                        const { id, clientRequestId, ...data } = log;
-                        const cleaned = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== null && value !== undefined));
-                        void persistWithAmbiguousRecovery('/api/logs', { ...cleaned, loggedAt: buildLoggedAtForSelectedDate(selectedDate), clientRequestId: createConversationMessageId() }, token)
-                          .then(() => load({ silent: true })).catch(error => Alert.alert('未能记录', normalizeErrorMessage(error))).finally(() => setConversationLoading(false));
-                      } }]);
-                    }}><Ionicons name='copy-outline' size={16} color={journalTheme.accent} /></Pressable>
-                    <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openEditLogModal(log)}>
-                      <Text style={[styles.journalEntryActionText, themedJournal.text]}>编辑</Text>
-                    </Pressable>
-                    <Pressable style={[styles.journalEntryActionButton, themedJournal.actionButton]} onPress={() => openLogMoreActions(log)}>
-                      <Text style={[styles.journalEntryActionText, themedJournal.text]}>更多</Text>
-                    </Pressable>
-                  </View>
+                  <Pressable accessibilityRole='button' accessibilityLabel={`记录操作：${summarizeFoodFromLog(log)}`} accessibilityHint='编辑、再记一次、常用餐食或删除' onPress={()=>setActionRecord({kind:'food',log})} style={styles.recordMenuButton}>
+                    <Ionicons name='ellipsis-horizontal' size={22} color={journalTheme.textMuted}/>
+                  </Pressable>
                 </View>
               </View>
             );
@@ -3783,12 +3735,12 @@ function DashboardScreen({
             multiline
           />
           <Pressable
-            style={[styles.journalSendButton, { backgroundColor: conversationLoading ? journalTheme.borderStrong : journalTheme.accent }]}
+            style={[styles.journalSendButton, { backgroundColor: conversationLoading ? journalTheme.borderStrong : journalTheme.button }]}
             onPress={() => void sendConversationMessage()}
             disabled={conversationLoading || imageProcessing || !draftReady || !reviewReady || (!conversationInput.trim() && !conversationImageBase64)}
             accessibilityLabel='发送记录'
           >
-            <Ionicons name={conversationLoading ? 'hourglass-outline' : 'arrow-up'} size={22} color={journalThemeMode === 'night' ? '#142019' : '#ffffff'} />
+            <Ionicons name={conversationLoading ? 'hourglass-outline' : 'arrow-up'} size={22} color={'#ffffff'} />
           </Pressable>
         </View>
 
@@ -3819,8 +3771,8 @@ function DashboardScreen({
             ]}
           >
             <View style={[styles.journalEditModalCard, themedJournal.surface]}>
-              <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={{ gap: 10 }}>
               <Text style={[styles.journalEditModalTitle, themedJournal.text]}>编辑记录</Text>
+              <ScrollView style={{flex:1,minHeight:0}} keyboardShouldPersistTaps='handled' contentContainerStyle={{ gap: 10, paddingBottom:12 }}>
               <OptionRow label='餐次' options={mealOptions} value={editMealType} onChange={setEditMealType} />
               <OptionRow label='份量' options={[{ label: '半份', value: '0.5' }, { label: '一份', value: '1' }, { label: '两份', value: '2' }]} value={String(editPortion)} onChange={value => {
                 const log = logs.find(item => item.id === editLogId);
@@ -3882,16 +3834,15 @@ function DashboardScreen({
               </View>
 
               <OptionRow label='可见范围' options={visibilityOptions} value={editVisibility} onChange={setEditVisibility} />
-
-              <View style={styles.rowGap}>
-                <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={closeEditModal} disabled={savingEdit}>
+              </ScrollView>
+              <View style={[styles.editFooter,{borderTopColor:journalTheme.border}]}>
+                <Pressable accessibilityRole='button' accessibilityLabel='取消编辑' style={[styles.secondaryButton, themed.secondaryButton,styles.editFooterButton]} onPress={closeEditModal} disabled={savingEdit}>
                   <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>取消</Text>
                 </Pressable>
-                <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void saveEditedLog()} disabled={savingEdit}>
+                <Pressable accessibilityRole='button' accessibilityLabel='保存饮食修改' style={[styles.primaryButton, themed.primaryButton,styles.editFooterButton]} onPress={() => void saveEditedLog()} disabled={savingEdit}>
                   <Text style={styles.primaryButtonText}>{savingEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
-              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -3904,8 +3855,8 @@ function DashboardScreen({
             ]}
           >
             <View style={[styles.journalEditModalCard, themedJournal.surface]}>
-              <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={{ gap: 10 }}>
               <Text style={[styles.journalEditModalTitle, themedJournal.text]}>编辑运动</Text>
+              <ScrollView style={{flex:1,minHeight:0}} keyboardShouldPersistTaps='handled' contentContainerStyle={{ gap: 10,paddingBottom:12 }}>
 
               <TextInput
                 style={[styles.input, styles.journalEditInput, themedJournal.input]}
@@ -3975,19 +3926,26 @@ function DashboardScreen({
                 onChange={setEditExerciseIntensity}
               />
               <OptionRow label='可见范围' options={visibilityOptions} value={editExerciseVisibility} onChange={setEditExerciseVisibility} />
-
-              <View style={styles.rowGap}>
-                <Pressable style={[styles.secondaryButton, themed.secondaryButton]} onPress={closeExerciseEditModal} disabled={savingExerciseEdit}>
+              </ScrollView>
+              <View style={[styles.editFooter,{borderTopColor:journalTheme.border}]}>
+                <Pressable accessibilityRole='button' accessibilityLabel='取消编辑' style={[styles.secondaryButton, themed.secondaryButton,styles.editFooterButton]} onPress={closeExerciseEditModal} disabled={savingExerciseEdit}>
                   <Text style={[styles.secondaryButtonText, themed.secondaryButtonText]}>取消</Text>
                 </Pressable>
-                <Pressable style={[styles.primaryButton, themed.primaryButton]} onPress={() => void saveEditedExercise()} disabled={savingExerciseEdit}>
+                <Pressable accessibilityRole='button' accessibilityLabel='保存运动修改' style={[styles.primaryButton, themed.primaryButton,styles.editFooterButton]} onPress={() => void saveEditedExercise()} disabled={savingExerciseEdit}>
                   <Text style={styles.primaryButtonText}>{savingExerciseEdit ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </View>
-              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
+        {actionRecord && <RecordActions title={actionRecord.kind==='food'?summarizeFoodFromLog(actionRecord.log):actionRecord.exercise.exerciseType}
+          pending={(actionRecord.kind==='food'?actionRecord.log.id:actionRecord.exercise.id).startsWith('pending-')} theme={journalTheme} date={selectedDate}
+          favorite={actionRecord.kind==='food'&&favorites.some(log=>log.id===actionRecord.log.id)}
+          onClose={()=>setActionRecord(null)}
+          onEdit={()=>{setActionRecord(null);if(actionRecord.kind==='food')openEditLogModal(actionRecord.log);else openEditExerciseModal(actionRecord.exercise);}}
+          onDelete={()=>actionRecord.kind==='food'?deleteLogRecord(actionRecord.log):deleteExerciseRecord(actionRecord.exercise)}
+          onRepeat={actionRecord.kind==='food'?()=>repeatFood(actionRecord.log):undefined}
+          onFavorite={actionRecord.kind==='food'?async()=>{const log=actionRecord.log;const next=favorites.some(item=>item.id===log.id)?favorites.filter(item=>item.id!==log.id):[...favorites,log].slice(-20);await writeCache(token,'favorites',next);setFavorites(next);}:undefined}/>}
         {review && reviewOpen && <RecognitionReview draft={review} theme={journalTheme} busy={reviewSaving} onChange={changeReview} onClose={() => setReviewOpen(false)} onDiscard={() => void discardReview()} onSave={() => void saveReview()} />}
         {inboxOpen && <RecognitionInbox jobs={inboxJobs} ticket={inbox.ticket} busy={inbox.busy} message={inbox.message} theme={journalTheme} baseUrl={runtimeApiBaseUrl} token={token} onClose={()=>setInboxOpen(false)} onOpen={job=>void openTaskReview(job)} onRetry={job=>void taskAction(job,'retry')} onDiscard={job=>Alert.alert('放弃识别任务','这会删除待校对结果和任务图片，不影响已保存记录。',[{text:'取消',style:'cancel'},{text:'放弃',style:'destructive',onPress:()=>void taskAction(job,'discard')}])} onRetryUpload={()=>{void inbox.retryUpload().catch(error=>Alert.alert('上传尚未确认',normalizeErrorMessage(error)));}} onCancelUpload={()=>{void inbox.cancelUpload().catch(error=>Alert.alert('暂未取消',normalizeErrorMessage(error)));}} onRefresh={()=>void inbox.refresh(true)}/>}
       </View>
@@ -5764,6 +5722,7 @@ export default function App() { return <SafeAreaProvider><AppContent /></SafeAre
 
 function AppContent() {
   const [booting, setBooting] = useState(true);
+  useEffect(() => { if (!booting) void SplashScreen.hideAsync().catch(() => {}); },[booting]);
   const [auth, setAuth] = useState<AuthPayload | null>(null);
   const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
 
@@ -5828,8 +5787,10 @@ function AppContent() {
   if (booting) {
     return (
       <SafeAreaView style={styles.safeCenter}>
-        <ActivityIndicator size="large" color="#1e5eff" />
-        <Text style={styles.hint}>正在初始化...</Text>
+        <Image source={require('./assets/splash-icon.png')} style={{width:128,height:128}}/>
+        <Text style={{color:'#24252C',fontSize:24,fontWeight:'700'}}>NutriFlow</Text>
+        <Text style={{color:'#626471',fontSize:14}}>营养日记</Text>
+        <ActivityIndicator size='small' color='#315AD9'/>
       </SafeAreaView>
     );
   }
@@ -5844,11 +5805,11 @@ function AppContent() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: "#081223",
+    backgroundColor: "#18181D",
   },
   safeCenter: {
     flex: 1,
-    backgroundColor: "#081223",
+    backgroundColor: "#F6F6F8",
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
@@ -5869,6 +5830,7 @@ const styles = StyleSheet.create({
   authContainer: {
     padding: 24,
     gap: 12,
+    width:'100%',maxWidth:480,alignSelf:'center',
   },
   logo: {
     fontSize: 34,
@@ -5882,7 +5844,7 @@ const styles = StyleSheet.create({
   },
   modeRow: {
     flexDirection: "row",
-    backgroundColor: "#111b2d",
+    backgroundColor: "#24242C",
     borderRadius: 10,
     overflow: "hidden",
     marginBottom: 4,
@@ -5894,7 +5856,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   modeButtonActive: {
-    backgroundColor: "#1d2d4f",
+    backgroundColor: "#2C3557",
   },
   modeText: {
     color: "#9fb0cc",
@@ -5904,21 +5866,21 @@ const styles = StyleSheet.create({
     color: "#f5f8ff",
   },
   input: {
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
     color: "#e8edfb",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#273245",
+    borderColor: "#3D3D49",
     paddingHorizontal: 12,
     paddingVertical: 11,
     marginTop: 8,
   },
   textareaInput: {
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
     color: "#e8edfb",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#273245",
+    borderColor: "#3D3D49",
     paddingHorizontal: 12,
     paddingVertical: 11,
     marginTop: 8,
@@ -5926,7 +5888,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   primaryButton: {
-    backgroundColor: "#2667ff",
+    backgroundColor: "#315AD9",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
@@ -5939,7 +5901,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   secondaryButton: {
-    borderColor: "#2b6fff",
+    borderColor: "#93AEFF",
     borderWidth: 1,
     borderRadius: 10,
     alignItems: "center",
@@ -5954,7 +5916,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   ghostButton: {
-    borderColor: "#314055",
+    borderColor: "#3D3D49",
     borderWidth: 1,
     borderRadius: 10,
     alignItems: "center",
@@ -6000,8 +5962,8 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#314055",
-    backgroundColor: "#111b2d",
+    borderColor: "#3D3D49",
+    backgroundColor: "#24242C",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -6023,7 +5985,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
   },
   dynamicFilterChipActive: {
     borderColor: "#4f88ff",
@@ -6204,7 +6166,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     maxHeight: 320,
     borderWidth: 1,
-    borderColor: "#273245",
+    borderColor: "#3D3D49",
     borderRadius: 12,
     padding: 10,
     gap: 8,
@@ -6248,7 +6210,7 @@ const styles = StyleSheet.create({
   },
   journalSafe: {
     flex: 1,
-    backgroundColor: "#081223",
+    backgroundColor: "#18181D",
   },
   journalContainer: {
     flex: 1,
@@ -6374,7 +6336,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 4,
     paddingHorizontal: 2,
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
   },
   journalCalendarCellActive: {
     borderColor: "#4f88ff",
@@ -6406,7 +6368,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "#2f3e57",
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
     paddingHorizontal: 7,
     paddingVertical: 6,
     alignItems: "center",
@@ -6587,7 +6549,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 5,
     paddingHorizontal: 7,
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
   },
   journalMacroLabel: {
     color: "#9eb2d4",
@@ -6702,6 +6664,7 @@ const styles = StyleSheet.create({
     color: "#93a9cc",
     fontSize: 11,
   },
+  recordMenuButton: { width:44,height:44,alignItems:'center',justifyContent:'center' },
   journalEntryActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -6804,6 +6767,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   journalEditModalCard: {
+    width:'100%',maxWidth:600,alignSelf:'center',height:'90%',
     maxHeight: '90%',
     borderWidth: 1,
     borderColor: "#2a3a55",
@@ -6817,6 +6781,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
   },
+  editFooter:{flexDirection:'row',gap:12,paddingTop:12,borderTopWidth:1},
+  editFooterButton:{flex:1,minWidth:0,minHeight:48,marginTop:0},
   journalEditInput: {
     minHeight: 40,
   },
@@ -6854,7 +6820,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#29384f",
     borderRadius: 8,
-    backgroundColor: "#111b2d",
+    backgroundColor: "#24242C",
     color: "#e8f0ff",
     paddingHorizontal: 9,
     paddingVertical: 6,
@@ -6894,7 +6860,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    backgroundColor: "#0f1a2f",
+    backgroundColor: "#24242C",
   },
   journalVisibilityChipActive: {
     borderColor: "#4f88ff",

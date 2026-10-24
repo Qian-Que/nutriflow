@@ -14,20 +14,31 @@ React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记�
 
 ## 当前版本与下载
 
-- Android 版本：**1.5.1**（`versionCode: 9`）。
-- 移动端构建标识：`2026-10-24-r22`。
-- [v1.5.1 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.5.1)
-- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.5.1/NutriFlow-v1.5.1-android.apk)
+- Android 版本：**1.6.0**（`versionCode: 10`）。
+- 移动端构建标识：`2026-10-24-r23`。
+- [v1.6.0 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.6.0)
+- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.6.0/NutriFlow-v1.6.0-android.apk)
 - 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
 - 此次发布不改变主备 AI 配置；测速功能不会发布草稿，也不代表第三方模型已通过真实图片测试。
 
 APK SHA-256：
 
 ```text
-fa1073efa9e9048476bb68cf3e4469949aec3eb226c090e152d777162236a3d9
+7aa8487bdfd55e4a9029fbd61a869aabfc72ac990b12b9b3b1c80e342e13293b
 ```
 
 近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
+
+### 1.6.0 品牌视觉与记录操作
+
+- 图标、Android 自适应图标、原生启动页与登录标志统一为简洁 N 形标志，蓝色配珊瑚色细节。启动页使用与 SDK 54 匹配的 `expo-splash-screen`，本地初始化结束后直接进入应用，不添加人为等待。
+- 去除绿色主题，日间使用灰白层次，夜间使用石墨黑；蓝色用于操作，珊瑚色强调热量，营养类型保留不同颜色。同步覆盖记录、目标、体重、动态、设置、校对和编辑，安卓光标强调色也改为蓝色。
+- 记录卡片只保留一个三点操作入口，替代重复的“编辑 / 更多”和分散按钮。饮食菜单包含编辑、再记一次、常用餐食、删除；运动只显示适用操作。
+- 删除与再记一次需确认，菜单忙碌时锁定、防止连点；失败在菜单内显示并允许重试，待同步记录不能编辑或删除。删除成功响应丢失后再次请求，已不存在的记录按删除完成处理。
+- 饮食与运动编辑表单采用固定标题、可滚动内容和底部保存/取消栏；键盘弹出时仍可操作，窄屏不必滚到表单末尾才能保存。
+- 包名、签名、存储键、后台识别及 AI 配置不变。新增 `verify-record-actions.cjs` 和 `verify-brand-assets.cjs`，覆盖操作确认、防连点、失败重试、待同步限制和图标尺寸/透明度/像素校验。
+
+图形源文件为 `mobile/assets/brand-mark.svg`；`cd mobile` 后运行 `npm run brand:assets` 可重新生成图标资源。原生启动配置更新使用 `npx expo prebuild --platform android --no-install`（不使用 `--clean`），保留已有签名，再按原流程构建。启动页验证使用 release APK，参见 [Expo 官方说明](https://docs.expo.dev/versions/latest/sdk/splash-screen/)。
 
 ### 1.5.1 名称统一与更新兼容
 

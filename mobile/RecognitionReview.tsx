@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { TimingDetails } from './RecognitionInbox';
 import { changeReviewItem, needsReviewAcknowledgement, nutrientFields, reviewBody, scaleReview, removeReviewItem, type ReviewDraft } from './recognitionDraft';
 
-type Theme = { background: string; surface: string; border: string; text: string; textMuted: string; accent: string; input: string; accentSoft: string; danger: string };
+type Theme = { background: string; surface: string; border: string; text: string; textMuted: string; accent: string; button:string; input: string; accentSoft: string; danger: string };
 export function RecognitionReview({ draft, theme, busy, onChange, onClose, onDiscard, onSave }: {
   draft: ReviewDraft; theme: Theme; busy: boolean; onChange: (value: ReviewDraft) => void;
   onClose: () => void; onDiscard: () => void; onSave: () => void;
@@ -69,8 +69,8 @@ export function RecognitionReview({ draft, theme, busy, onChange, onClose, onDis
         </ScrollView>
         <View style={[styles.footer, { borderColor: theme.border, backgroundColor: theme.surface }]}>
           {!!error && <Text accessibilityRole='alert' style={{ color: theme.danger, marginBottom: 8 }}>{error}</Text>}
-          <Pressable disabled={busy} accessibilityLabel='确认保存记录' onPress={() => { try { reviewBody(draft); setError(''); onSave(); } catch (e) { setError((e as Error).message); } }} style={[styles.save, { backgroundColor: theme.accent, opacity: busy ? 0.6 : 1 }]}>
-            {busy ? <ActivityIndicator color={theme.background} /> : <Ionicons name='checkmark-outline' size={22} color={theme.background} />}<Text style={{ color: theme.background, fontWeight: '700' }}>{busy ? '保存中' : draft.submitted ? '重试保存' : '确认保存'}</Text>
+          <Pressable disabled={busy} accessibilityLabel='确认保存记录' onPress={() => { try { reviewBody(draft); setError(''); onSave(); } catch (e) { setError((e as Error).message); } }} style={[styles.save, { backgroundColor: theme.button, opacity: busy ? 0.6 : 1 }]}>
+            {busy ? <ActivityIndicator color='#ffffff' /> : <Ionicons name='checkmark-outline' size={22} color='#ffffff' />}<Text style={{ color:'#ffffff', fontWeight: '700' }}>{busy ? '保存中' : draft.submitted ? '重试保存' : '确认保存'}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>

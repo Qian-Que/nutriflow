@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "brand:assets": "node scripts/generate-brand-assets.cjs",
+    "verify:ui": "node scripts/verify-record-actions.cjs && node scripts/verify-brand-assets.cjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -24,6 +26,7 @@
     "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "~17.0.10",
     "expo-sharing": "~14.0.8",
+    "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -34,6 +37,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "sharp": "0.35.5",
     "typescript": "~5.9.2"
   },
   "private": true
