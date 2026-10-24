@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppUpdateNotice, type UpdateState } from './AppUpdateNotice';
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -92,6 +92,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
     </Pressable>)}
   </View>;
   return <Modal visible animationType='slide' onRequestClose={onClose}>
+    <SafeAreaProvider>
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
@@ -145,6 +146,7 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
       </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </SafeAreaProvider>
   </Modal>;
 }
 const styles = StyleSheet.create({

@@ -14,20 +14,28 @@ React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记�
 
 ## 当前版本与下载
 
-- Android 版本：**1.6.0**（`versionCode: 10`）。
-- 移动端构建标识：`2026-10-24-r24`。
-- [v1.6.0 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.6.0)
-- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.6.0/NutriFlow-v1.6.0-android.apk)
+- Android 版本：**1.6.1**（`versionCode: 11`）。
+- 移动端构建标识：`2026-10-25-r25`。
+- [v1.6.1 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.6.1)
+- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.6.1/NutriFlow-v1.6.1-android.apk)
 - 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
 - 此次发布不改变主备 AI 配置；测速功能不会发布草稿，也不代表第三方模型已通过真实图片测试。
 
 APK SHA-256：
 
 ```text
-417c564602d89603272f1e3a0c02135c06c5518706d03cb603a156a239adb6ea
+3f825404f10f411860d097e467b4aeb18ed83bac5b727cfef4c1ce637e9abdf7
 ```
 
 近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
+
+### 1.6.1 设置返回后的底部布局修复
+
+- 修复设置中弹出键盘、返回记录页时底部“可见范围”容易被导航栏遮挡的问题。记录页改用按实际键盘遮挡留空的布局，不再固定为缓存的初始高度。
+- 设置弹窗使用独立安全区域；打开或关闭设置时收起键盘，设置中的键盘不再驱动背后记录页与底栏收缩。
+- 输入区和可见范围作为不可压缩的整体，列表让出空间；窄屏可换行，底部导航只计算一次安全区域。
+- 保留当前配色、可见范围选项和原有草稿。增加单选控件的选中状态语义及模拟器回归脚本 `mobile/scripts/verify-settings-return.ps1`。
+- 用户报告机型为 iQOO Neo9 Pro。验证覆盖模拟器的多次返回、设置键盘、记录输入键盘、主题切换和 1.3 倍字体，以及 Web 移动尺寸；不等同于该机型真机验证。
 
 ### 1.6.0 品牌视觉与记录操作
 

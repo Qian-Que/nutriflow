@@ -47,7 +47,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-24-r24";
+const APP_BUILD_LABEL = "2026-10-25-r25";
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
@@ -2290,6 +2290,7 @@ function DashboardScreen({
   journalThemeMode,
   onJournalThemeModeChange,
   onOpenSettings,
+  settingsOpen,
   update,
 }: {
   update: UpdateState;
@@ -2298,6 +2299,7 @@ function DashboardScreen({
   journalThemeMode: JournalThemeMode;
   onJournalThemeModeChange: (mode: JournalThemeMode) => void;
   onOpenSettings: () => void;
+  settingsOpen: boolean;
 }) {
   const [savedLogs, setLogs] = useState<FoodLog[]>([]);
   const [, setSummary] = useState({ calories: 0, proteinGram: 0, carbsGram: 0, fatGram: 0, fiberGram: 0 });
@@ -2407,10 +2409,12 @@ function DashboardScreen({
   const inboxJobs = inbox.jobs.filter(job => !pending.some(entry => entry.id === `recognition-${job.id}`));
 
   useEffect(() => {
+    setKeyboardVisible(false);
+    if (settingsOpen) return;
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => { show.remove(); hide.remove(); };
-  }, []);
+  }, [settingsOpen]);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -3420,8 +3424,9 @@ function DashboardScreen({
   }
 
   return (
-    <SafeAreaView style={[styles.journalSafe, themedJournal.screen]}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
+    <SafeAreaView edges={['top','left','right']} style={[styles.journalSafe, themedJournal.screen]}>
+      {/* Padding follows current overlap without caching the pre-modal screen height. */}
+      <KeyboardAvoidingView enabled={!settingsOpen} style={{ flex: 1 }} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
       <View style={styles.journalContainer}>
         <View style={styles.journalTopBar}>
           <Pressable style={[styles.journalDateButton, themedJournal.surface]} onPress={() => setCalendarExpanded((prev) => !prev)}>
@@ -3702,6 +3707,7 @@ function DashboardScreen({
           </View>
         ) : null}
 
+        <View style={styles.journalComposerFooter}>
         <View style={[styles.composerModeRow, { borderTopColor: journalTheme.border }]}>
           {([{ value: 'AUTO', label: '自动', icon: 'sparkles-outline' }, { value: 'FOOD', label: '饮食', icon: 'restaurant-outline' }, { value: 'EXERCISE', label: '运动', icon: 'fitness-outline' }] as const).map(option => (
             <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)}
@@ -3753,6 +3759,10 @@ function DashboardScreen({
                 <Pressable
                   key={option.value}
                   disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)}
+                  accessibilityRole='radio'
+                  accessibilityLabel={`记录可见范围：${option.label}`}
+                  accessibilityState={{checked:active}}
+                  aria-checked={active}
                   style={[styles.journalVisibilityChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
                   onPress={() => setConversationVisibility(option.value)}
                 >
@@ -3763,6 +3773,7 @@ function DashboardScreen({
           </View>
         </View>
 
+        </View>
         <Modal visible={Boolean(editLogId)} transparent animationType='fade' onRequestClose={closeEditModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
             style={[
@@ -5672,7 +5683,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
         <Tab.Navigator
           screenOptions={({ route }) => ({
             headerShown: false,
-            tabBarHideOnKeyboard: true,
+            tabBarHideOnKeyboard: !settingsOpen,
             tabBarIcon: ({ color, focused }) => (
               <Ionicons name={tabIconMap[route.name] ?? 'ellipse-outline'} size={22} color={color} />
             ),
@@ -5703,7 +5714,8 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
                 onAuthInvalid={onLogout}
                 journalThemeMode={journalThemeMode}
                 onJournalThemeModeChange={setJournalThemeMode}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenSettings={() => {Keyboard.dismiss();setSettingsOpen(true);}}
+                settingsOpen={settingsOpen}
               />
             )}
           </Tab.Screen>
@@ -5713,7 +5725,7 @@ function MainTabs({ auth, onLogout }: { auth: AuthPayload; onLogout: () => void 
         </Tab.Navigator>
         <StatusBar style={journalTheme.statusBar} />
       </NavigationContainer>
-      {settingsOpen && <SettingsPanel update={update} token={auth.token} email={auth.user.email} request={rawApiRequest} theme={journalTheme} onClose={() => setSettingsOpen(false)} onLogout={onLogout} mode={journalThemeMode} onModeChange={setJournalThemeMode} />}
+      {settingsOpen && <SettingsPanel update={update} token={auth.token} email={auth.user.email} request={rawApiRequest} theme={journalTheme} onClose={() => {Keyboard.dismiss();setSettingsOpen(false);}} onLogout={onLogout} mode={journalThemeMode} onModeChange={setJournalThemeMode} />}
     </JournalThemeContext.Provider>
   );
 }
@@ -6563,6 +6575,7 @@ const styles = StyleSheet.create({
   },
   journalChatList: {
     flex: 1,
+    minHeight: 0,
     borderWidth: 0,
     borderColor: "#243146",
     borderRadius: 0,
@@ -6794,6 +6807,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 6,
   },
+  journalComposerFooter: { flexShrink:0,gap:6 },
   composerModeRow: { flexDirection: 'row', gap: 6, paddingTop: 8, borderTopWidth: 1 },
   composerMode: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 36, borderRadius: 6 },
   recognitionProgress: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
@@ -6841,6 +6855,8 @@ const styles = StyleSheet.create({
   },
   journalComposerMetaRow: {
     flexDirection: "row",
+    flexWrap: 'wrap',
+    flexShrink: 0,
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
@@ -6848,6 +6864,7 @@ const styles = StyleSheet.create({
   },
   journalVisibilityRow: {
     flexDirection: "row",
+    flexShrink: 1,
     gap: 6,
     flexWrap: "wrap",
     justifyContent: "flex-end",
