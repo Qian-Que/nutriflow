@@ -16,7 +16,7 @@ export function useRecognitionInbox(transport: RecognitionTransport, token: stri
     fetching.current = true;
     const version = generation.current;
     try {
-      const response = await transport<{jobs:BackgroundJob[]}>('/api/recognition/jobs',{},token,{timeoutMs:8000});
+      const response = await transport<{jobs:BackgroundJob[]}>('/api/recognition/jobs?includeSaved=1',{},token,{timeoutMs:8000});
       if (submitting.current || generation.current !== version) return;
       let list = await mergeJobList(token,response.jobs);
       if (recover && !submitting.current) {
@@ -63,7 +63,7 @@ export function useRecognitionInbox(transport: RecognitionTransport, token: stri
       if (active.current) {
         generation.current++;
         if (result.clearedDraft) setAcceptedUpload(result.ticket);
-        setTicket(null); setMessage(result.job.reviewState==='dismissed'?'上传已取消，原内容保留':'已上传，正在后台识别');
+        setTicket(null); setMessage(result.job.reviewState==='dismissed'?'上传已取消，原内容保留':result.job.reviewState==='saved'?'识别完成，已保存':'已上传，正在后台识别');
         setJobs(await readCache<BackgroundJob[]>(token,JOBS_CACHE) ?? []);
       }
       return result;

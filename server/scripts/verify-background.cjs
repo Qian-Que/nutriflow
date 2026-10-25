@@ -19,7 +19,7 @@ async function main(){
   const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base='http://127.0.0.1:'+server.address().port;
   const headers=user=>({'Content-Type':'application/json',...(user?{Authorization:'Bearer '+createToken({sub:user,email:user+'@example.test',displayName:user})}:{})});
   async function api(path,method='GET',body,user='owner'){const r=await originalFetch(base+'/api/recognition'+path,{method,headers:headers(user),...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,data:await r.json()};}
-  const context={loggedAt:'2026-10-23T04:00:00Z',mealType:'LUNCH',visibility:'PRIVATE',imageThumbnail:'data:image/png;base64,iVBORw0KGgo='};
+  const context={loggedAt:'2026-10-23T04:00:00Z',mealType:'LUNCH',visibility:'PRIVATE',autoSave:false,imageThumbnail:'data:image/png;base64,iVBORw0KGgo='};
   const body=(id,image=true)=>({requestId:id,operation:'entry',input:{mode:'AUTO',description:'milk',...(image?{imageBase64:'iVBORw0KGgo=',mimeType:'image/png'}:{})},context});
   const wait=async(id,user='owner')=>{for(let i=0;i<200;i++){const r=await api('/jobs/'+id,'GET',undefined,user);if(['completed','failed'].includes(r.data.status))return r.data;await new Promise(r=>setTimeout(r,20));}throw Error('timeout');};
   try{

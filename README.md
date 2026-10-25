@@ -14,20 +14,28 @@ React Native / Expo + Express + SQLite 的饮食、运动、体重和社交记�
 
 ## 当前版本与下载
 
-- Android 版本：**1.6.1**（`versionCode: 11`）。
-- 移动端构建标识：`2026-10-25-r25`。
-- [v1.6.1 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.6.1)
-- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.6.1/NutriFlow-v1.6.1-android.apk)
+- Android 版本：**1.6.2**（`versionCode: 12`）。
+- 移动端构建标识：`2026-10-25-r26`。
+- [v1.6.2 发布说明](https://github.com/Qian-Que/nutriflow/releases/tag/v1.6.2)
+- [下载 Android APK](https://github.com/Qian-Que/nutriflow/releases/download/v1.6.2/NutriFlow-v1.6.2-android.apk)
 - 安装要求：Android 7.0（API 24）及以上。优先覆盖安装；不要为更新版本直接卸载，以免丢失尚未同步的本地草稿。
 - 此次发布不改变主备 AI 配置；测速功能不会发布草稿，也不代表第三方模型已通过真实图片测试。
 
 APK SHA-256：
 
 ```text
-3f825404f10f411860d097e467b4aeb18ed83bac5b727cfef4c1ce637e9abdf7
+d79b0399e955e57fc5d96a684cf2d19b4aa75c999e8e11727915407ec2be4d6a
 ```
 
 近期更新包含日间/夜间主题、营养图表、离线草稿与同步恢复、管理员全局 AI 配置，以及 Gemini 输出额度、分段响应解析和错误提示改进。
+
+### 1.6.2 识别后直接保存
+
+- 新上传默认在服务器识别后直接保存，自动更新记录和营养统计，不再每次进入人工校对。上传确认后即可离开应用，重新打开自动恢复结果。
+- 低置信度、图片转文字估算只保留提示，不强制确认；仍可在记录中编辑。识别失败不创建记录，保存失败保留识别结果和图片，可重试保存而不重复调用模型。
+- 旧的待校对结果不自动覆盖，任务列表支持“直接保存”或“编辑”；直接保存优先使用已有本机校对修改。最近 20 条已保存任务保留分段耗时。
+- 保持原始日期、餐次、可见范围、图片及模型来源，重复上传/重试不会重复入账，删除过的记录不会被重新创建。
+- 验证包含后台自动保存、低置信度、文字降级、失败恢复、权限与幂等回归，浏览器实时入账与旧修改保留，以及安卓模拟器上传后关闭应用再打开。未连接 iQOO 真机。
 
 ### 1.6.1 设置返回后的底部布局修复
 

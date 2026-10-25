@@ -47,7 +47,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-25-r25";
+const APP_BUILD_LABEL = "2026-10-25-r26";
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
@@ -2407,6 +2407,7 @@ function DashboardScreen({
   const journalTheme = journalThemeTokens[journalThemeMode];
   const inbox = useRecognitionInbox(rawApiRequest, token);
   const inboxJobs = inbox.jobs.filter(job => !pending.some(entry => entry.id === `recognition-${job.id}`));
+  const savedJobIds = inbox.jobs.filter(job => job.reviewState === 'saved').map(job => job.id).sort().join(',');
 
   useEffect(() => {
     setKeyboardVisible(false);
@@ -3063,9 +3064,9 @@ function DashboardScreen({
       await writeDraft(token,{text:conversationInput,imageBase64:conversationImageBase64,mimeType:conversationImageMimeType,date:selectedDate,entryMode});
       await inbox.submit(
         {mode:entryMode,description:description || undefined,imageBase64:conversationImageBase64 ?? undefined,mimeType:conversationImageMimeType},
-        {loggedAt:buildLoggedAtForSelectedDate(selectedDate),mealType:inferMealTypeForDate(selectedDate),visibility:conversationVisibility,imageThumbnail:conversationThumbnail},
+        {loggedAt:buildLoggedAtForSelectedDate(selectedDate),mealType:inferMealTypeForDate(selectedDate),visibility:conversationVisibility,imageThumbnail:conversationThumbnail,autoSave:true},
       );
-      setSyncMessage('已上传，可以离开；结果会进入待校对列表');
+      setSyncMessage('已上传，可以离开；识别完成后自动保存');
     } catch (error) {
       if (isUnauthorizedError(error)) onAuthInvalid();
       else { setInboxOpen(true); Alert.alert('上传尚未确认',normalizeErrorMessage(error)); }
@@ -3078,6 +3079,20 @@ function DashboardScreen({
       await inbox.refresh();
     } catch (error) { Alert.alert('任务操作未完成',normalizeErrorMessage(error)); }
   };
+  const saveTaskResult = async (job: BackgroundJob) => {
+    try {
+      const cached = await readCache<ReviewDraft>(token,reviewCacheKey(job.id));
+      // Keep any existing local corrections when saving an older pending task.
+      const body = cached ? {...reviewBody({...cached,acknowledged:true}),acknowledged:true} : undefined;
+      await rawApiRequest(`/api/recognition/jobs/${job.id}/${cached?'confirm':'save-result'}`,{method:'POST',...(body?{body:JSON.stringify(body)}:{})},token);
+      await writeCache(token,reviewCacheKey(job.id),null);
+      setSyncMessage('识别结果已保存');
+      void load({silent:true}); void loadCalendar({silent:true}); void inbox.refresh();
+    } catch (error) { Alert.alert('暂未保存',normalizeErrorMessage(error)); }
+  };
+  useEffect(() => {
+    if (savedJobIds) { void load({silent:true}); void loadCalendar({silent:true}); }
+  },[savedJobIds,load,loadCalendar]);
   useFocusEffect(useCallback(() => {
     let active = true;
     void load(); void loadCalendar(); void inbox.refresh(true);
@@ -3692,7 +3707,7 @@ function DashboardScreen({
         </ScrollView>
 
         {(inboxJobs.length > 0 || inbox.ticket) && !keyboardVisible && <Pressable accessibilityRole='button' accessibilityLabel='打开识别任务' onPress={() => {setInboxOpen(true);void inbox.refresh();}} style={{minHeight:44,padding:10,gap:8,flexDirection:'row',alignItems:'center',backgroundColor:journalTheme.accentSoft}}>
-          <Ionicons name='albums-outline' size={20} color={journalTheme.accent}/><Text style={{flex:1,color:journalTheme.text}}>识别任务 · {inboxJobs.filter(job=>job.status==='completed').length} 待校对 · {inboxJobs.filter(job=>['queued','running'].includes(job.status)).length} 处理中{inboxJobs.some(job=>job.status==='failed')?` · ${inboxJobs.filter(job=>job.status==='failed').length} 失败`:''}{inbox.ticket?' · 上传待确认':''}</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent}/>
+          <Ionicons name='albums-outline' size={20} color={journalTheme.accent}/><Text style={{flex:1,color:journalTheme.text}}>识别任务{inboxJobs.some(job=>['queued','running'].includes(job.status))?` · ${inboxJobs.filter(job=>['queued','running'].includes(job.status)).length} 处理中`:''}{inboxJobs.some(job=>job.status==='completed'&&job.reviewState==='pending')?` · ${inboxJobs.filter(job=>job.status==='completed'&&job.reviewState==='pending').length} 待保存`:''}{inboxJobs.some(job=>job.status==='failed')?` · ${inboxJobs.filter(job=>job.status==='failed').length} 失败`:''}{inbox.ticket?' · 上传待确认':''}{inboxJobs.every(job=>job.reviewState==='saved')&&!inbox.ticket?' · 已完成':''}</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent}/>
         </Pressable>}
         {legacyReview && <Pressable accessibilityRole='button' accessibilityLabel='继续校对识别结果' onPress={() => {setReview(legacyReview);setReviewOpen(true);}} style={{ padding: 10, gap: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: journalTheme.accentSoft }}>
           <Ionicons name='create-outline' size={20} color={journalTheme.accent} /><Text style={{ flex: 1, color: journalTheme.text }}>1 条识别结果待确认</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent} />
@@ -3958,7 +3973,7 @@ function DashboardScreen({
           onRepeat={actionRecord.kind==='food'?()=>repeatFood(actionRecord.log):undefined}
           onFavorite={actionRecord.kind==='food'?async()=>{const log=actionRecord.log;const next=favorites.some(item=>item.id===log.id)?favorites.filter(item=>item.id!==log.id):[...favorites,log].slice(-20);await writeCache(token,'favorites',next);setFavorites(next);}:undefined}/>}
         {review && reviewOpen && <RecognitionReview draft={review} theme={journalTheme} busy={reviewSaving} onChange={changeReview} onClose={() => setReviewOpen(false)} onDiscard={() => void discardReview()} onSave={() => void saveReview()} />}
-        {inboxOpen && <RecognitionInbox jobs={inboxJobs} ticket={inbox.ticket} busy={inbox.busy} message={inbox.message} theme={journalTheme} baseUrl={runtimeApiBaseUrl} token={token} onClose={()=>setInboxOpen(false)} onOpen={job=>void openTaskReview(job)} onRetry={job=>void taskAction(job,'retry')} onDiscard={job=>Alert.alert('放弃识别任务','这会删除待校对结果和任务图片，不影响已保存记录。',[{text:'取消',style:'cancel'},{text:'放弃',style:'destructive',onPress:()=>void taskAction(job,'discard')}])} onRetryUpload={()=>{void inbox.retryUpload().catch(error=>Alert.alert('上传尚未确认',normalizeErrorMessage(error)));}} onCancelUpload={()=>{void inbox.cancelUpload().catch(error=>Alert.alert('暂未取消',normalizeErrorMessage(error)));}} onRefresh={()=>void inbox.refresh(true)}/>}
+        {inboxOpen && <RecognitionInbox jobs={inboxJobs} ticket={inbox.ticket} busy={inbox.busy} message={inbox.message} theme={journalTheme} baseUrl={runtimeApiBaseUrl} token={token} onClose={()=>setInboxOpen(false)} onOpen={job=>void openTaskReview(job)} onSave={saveTaskResult} onRetry={job=>void taskAction(job,'retry')} onDiscard={job=>Alert.alert('放弃识别任务','这会删除未保存结果和任务图片，不影响已保存记录。',[{text:'取消',style:'cancel'},{text:'放弃',style:'destructive',onPress:()=>void taskAction(job,'discard')}])} onRetryUpload={()=>{void inbox.retryUpload().catch(error=>Alert.alert('上传尚未确认',normalizeErrorMessage(error)));}} onCancelUpload={()=>{void inbox.cancelUpload().catch(error=>Alert.alert('暂未取消',normalizeErrorMessage(error)));}} onRefresh={()=>void inbox.refresh(true)}/>}
       </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

@@ -17,6 +17,7 @@ import { createExerciseRecord } from './exercises';
 const contextSchema = z.object({
   loggedAt: z.iso.datetime(), mealType: z.enum(['BREAKFAST','LUNCH','DINNER','SNACK']),
   visibility: z.enum(['PRIVATE','FRIENDS','PUBLIC']).default('PRIVATE'),
+  autoSave: z.boolean().default(true),
   imageThumbnail: z.string().max(500000).regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=\r\n]+$/).optional(),
 });
 const schema = z.object({ requestId: z.string().min(8).max(100), operation: z.enum(['entry','food-text','food-image','exercise-text','exercise-image','classify']), input: z.object({
@@ -30,6 +31,53 @@ function owned(id: string, userId: string) {
   const job = db.prepare('SELECT * FROM recognition_jobs WHERE id=? AND user_id=?').get(id, userId) as Job | undefined;
   if (!job) throw new HttpError(404, '识别任务不存在或已过期');
   return job;
+}
+function saveJobRecord(job: Job, body: Record<string, unknown>) {
+  if (job.review_state === 'dismissed') throw new HttpError(409,'该任务已被放弃');
+  if (job.status !== 'completed' || !job.result) throw new HttpError(409,'识别尚未完成');
+  const result = JSON.parse(job.result), context = job.context ? JSON.parse(job.context) : {};
+  if (!['pending','saved'].includes(job.review_state ?? '') || !['FOOD','EXERCISE'].includes(result.kind)) throw new HttpError(409,'任务不支持直接保存');
+  const clientRequestId = 'recognition-' + job.id;
+  if (job.review_state === 'saved') {
+    const table = result.kind === 'FOOD' ? 'food_logs' : 'exercise_logs';
+    if (!db.prepare(`SELECT id FROM ${table} WHERE user_id=? AND client_request_id=?`).get(job.user_id,clientRequestId)) throw new HttpError(409,'此任务已保存过，原记录已删除');
+  }
+  const input = job.input ? JSON.parse(job.input) : {};
+  const payload = {...body,clientRequestId,source:'AI',
+    aiProvider:result.analysis?.ai?.provider,aiModel:result.analysis?.ai?.model,aiRoute:result.analysis?.ai?.route,
+    imageUri:input.imageBase64 ? `data:${input.mimeType};base64,${input.imageBase64}` : undefined,imageThumbnail:context.imageThumbnail};
+  db.exec('SAVEPOINT save_recognition');
+  try {
+    const saved = result.kind === 'FOOD' ? createFoodRecord(job.user_id,payload,true) : createExerciseRecord(job.user_id,payload);
+    delete context.imageThumbnail;
+    db.prepare("UPDATE recognition_jobs SET review_state='saved',phase='已保存',error=NULL,input=NULL,context=? WHERE id=?").run(JSON.stringify(context),job.id);
+    db.exec('RELEASE save_recognition');
+    return saved;
+  } catch (error) { db.exec('ROLLBACK TO save_recognition; RELEASE save_recognition'); throw error; }
+}
+function saveOriginalResult(job: Job) {
+  const result = job.result ? JSON.parse(job.result) : {}, context = job.context ? JSON.parse(job.context) : {};
+  const analysis = result.analysis;
+  if (!analysis || !context.loggedAt) throw new HttpError(409,'没有可保存的识别结果');
+  const warning = result.fallback === 'TEXT_ONLY' ? '图片未成功解析，已按文字估算'
+    : !Number.isFinite(analysis.confidence) || analysis.confidence < 0.7 ? 'AI 估算，结果可能不准确' : '';
+  const note = [context.description || (result.kind === 'FOOD' ? analysis.items?.map((item: {name:string})=>item.name).join('、') : analysis.notes),warning].filter(Boolean).join('；');
+  const common = {loggedAt:context.loggedAt,visibility:context.visibility,note:note.slice(0,260)+(warning && note.length>260 ? `；${warning}` : '')};
+  return saveJobRecord(job,result.kind === 'FOOD'
+    ? {...common,...analysis.totals,nutrients:analysis.totals,items:analysis.items,mealType:context.mealType}
+    : {...common,exerciseType:analysis.exerciseType,durationMin:analysis.durationMin,intensity:analysis.intensity,met:analysis.met,calories:analysis.calories});
+}
+function tryAutomaticSave(job: Job) {
+  if (job.status !== 'completed' || job.review_state !== 'pending' || !job.context || JSON.parse(job.context).autoSave !== true) return;
+  try { saveOriginalResult(job); }
+  catch {
+    // Keep the successful analysis and image so saving can be retried without another model call.
+    db.prepare("UPDATE recognition_jobs SET phase='保存未完成',error='识别已完成，暂未保存，可直接重试保存或编辑结果' WHERE id=?").run(job.id);
+  }
+}
+export function recoverAutomaticSaves() {
+  const jobs = db.prepare("SELECT * FROM recognition_jobs WHERE status='completed' AND review_state='pending'").all() as Job[];
+  for (const job of jobs) tryAutomaticSave(job);
 }
 async function step<T>(job: Job, label: string, column: 'classification_ms' | 'recognition_ms' | 'fallback_ms', run: () => Promise<T>) {
   db.prepare('UPDATE recognition_jobs SET phase=? WHERE id=?').run(label, job.id);
@@ -65,6 +113,7 @@ async function processJob(job: Job) {
       return { kind: 'FOOD', analysis: await step(job,'识别饮食','recognition_ms',() => analyzeFoodText(input.description)) };
     });
     db.prepare("UPDATE recognition_jobs SET status='completed',phase='待校对',result=?,finished_at=?,input=CASE WHEN review_state='pending' THEN input ELSE NULL END WHERE id=?").run(JSON.stringify(result),Date.now(),job.id);
+    tryAutomaticSave(owned(job.id,job.user_id));
   } catch (error) {
     const failure = error instanceof Error && error.message.startsWith('无法判断记录类型') ? { status: 422, message: error.message } : publicAIError(error);
     db.prepare("UPDATE recognition_jobs SET status='failed',phase='识别失败',finished_at=?,input=CASE WHEN review_state='pending' THEN input ELSE NULL END,error=?,result=? WHERE id=?").run(Date.now(),failure.message,JSON.stringify({status:failure.status}),job.id);
@@ -79,6 +128,7 @@ function pump() {
   }
 }
 recoverRecognitionJobs();
+recoverAutomaticSaves();
 setImmediate(pump);
 
 export const recognitionRouter = Router();
@@ -101,6 +151,7 @@ recognitionRouter.post('/jobs', (req,res) => {
     // Adopt an interrupted pre-1.5 client ticket without invoking the model again.
     if (context && existing.review_state === null) {
       db.prepare("UPDATE recognition_jobs SET context=?,review_state='pending',input=? WHERE id=?").run(JSON.stringify(context),JSON.stringify(data.input),existing.id);
+      tryAutomaticSave(owned(existing.id,req.user!.id));
     }
     res.json(publicRecognitionJob(owned(existing.id,req.user!.id))); return;
   }
@@ -108,7 +159,7 @@ recognitionRouter.post('/jobs', (req,res) => {
   const busy = (db.prepare("SELECT count(*) AS n FROM recognition_jobs WHERE user_id=? AND status IN ('queued','running')").get(req.user!.id) as any).n;
   const unresolved = (db.prepare("SELECT count(*) AS n FROM recognition_jobs WHERE user_id=? AND review_state='pending'").get(req.user!.id) as any).n;
   const queued = (db.prepare("SELECT count(*) AS n FROM recognition_jobs WHERE status IN ('queued','running')").get() as any).n;
-  if (busy >= (context ? 5 : 1) || unresolved >= 50 || queued >= 16) { res.setHeader('Retry-After','15'); throw new HttpError(429,'任务较多，请稍后重试或先处理待校对记录'); }
+  if (busy >= (context ? 5 : 1) || unresolved >= 50 || queued >= 16) { res.setHeader('Retry-After','15'); throw new HttpError(429,'任务较多，请稍后重试或先处理未保存记录'); }
   if (!consumeAIQuota(req.user!.id)) { res.setHeader('Retry-After','60'); throw new HttpError(429,'已达到识别调用额度，请稍后重试'); }
   const id = createId();
   db.prepare("INSERT INTO recognition_jobs (id,user_id,request_id,fingerprint,operation,input,status,phase,created_at,context,review_state) VALUES (?,?,?,?,?,?,'queued','等待识别',?,?,?)")
@@ -117,6 +168,7 @@ recognitionRouter.post('/jobs', (req,res) => {
 });
 recognitionRouter.get('/jobs', (req,res) => {
   const jobs = db.prepare("SELECT * FROM recognition_jobs WHERE user_id=? AND review_state='pending' ORDER BY created_at DESC LIMIT 50").all(req.user!.id) as Job[];
+  if (req.query.includeSaved === '1') jobs.push(...db.prepare("SELECT * FROM recognition_jobs WHERE user_id=? AND review_state='saved' ORDER BY finished_at DESC LIMIT 20").all(req.user!.id) as Job[]);
   res.json({jobs:jobs.map(publicRecognitionJob)});
 });
 recognitionRouter.get('/jobs/:id', (req,res) => { res.json(publicRecognitionJob(owned(String(req.params.id),req.user!.id))); });
@@ -171,24 +223,13 @@ recognitionRouter.post('/jobs/:id/confirm', (req,res) => {
   const job = owned(String(req.params.id),req.user!.id);
   if (job.review_state === 'dismissed') throw new HttpError(409,'该任务已被放弃');
   if (job.status !== 'completed' || !job.result) throw new HttpError(409,'识别尚未完成');
-  const result = JSON.parse(job.result), context = job.context ? JSON.parse(job.context) : {};
+  const result = JSON.parse(job.result);
   if (!['pending','saved'].includes(job.review_state ?? '') || !['FOOD','EXERCISE'].includes(result.kind)) throw new HttpError(409,'任务不支持直接保存');
   if ((result.fallback === 'TEXT_ONLY' || !Number.isFinite(result.analysis?.confidence) || result.analysis.confidence < 0.7) && req.body?.acknowledged !== true) throw new HttpError(400,'请先核对不确定的识别结果');
-  const clientRequestId = 'recognition-' + job.id;
-  if (job.review_state === 'saved') {
-    const table = result.kind === 'FOOD' ? 'food_logs' : 'exercise_logs';
-    if (!db.prepare(`SELECT id FROM ${table} WHERE user_id=? AND client_request_id=?`).get(req.user!.id,clientRequestId)) throw new HttpError(409,'此任务已保存过，原记录已删除');
-  }
-  const input = job.input ? JSON.parse(job.input) : {};
-  const payload = {...req.body,clientRequestId,source:'AI',
-    aiProvider:result.analysis?.ai?.provider,aiModel:result.analysis?.ai?.model,aiRoute:result.analysis?.ai?.route,
-    imageUri:input.imageBase64 ? `data:${input.mimeType};base64,${input.imageBase64}` : undefined,imageThumbnail:context.imageThumbnail};
-  db.exec('SAVEPOINT confirm_recognition');
-  try {
-    const saved = result.kind === 'FOOD' ? createFoodRecord(req.user!.id,payload,true) : createExerciseRecord(req.user!.id,payload);
-    delete context.imageThumbnail;
-    db.prepare("UPDATE recognition_jobs SET review_state='saved',input=NULL,context=? WHERE id=?").run(JSON.stringify(context),job.id);
-    db.exec('RELEASE confirm_recognition');
-    res.status(saved.deduplicated ? 200 : 201).json(saved);
-  } catch (error) { db.exec('ROLLBACK TO confirm_recognition; RELEASE confirm_recognition'); throw error; }
+  const saved = saveJobRecord(job,req.body);
+  res.status(saved.deduplicated ? 200 : 201).json(saved);
+});
+recognitionRouter.post('/jobs/:id/save-result', (req,res) => {
+  const saved = saveOriginalResult(owned(String(req.params.id),req.user!.id));
+  res.status(saved.deduplicated ? 200 : 201).json(saved);
 });

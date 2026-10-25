@@ -21,6 +21,13 @@ async function main(){
   assert.equal((await storage.readCache('a',api.JOBS_CACHE)).length,2);
   const other=await api.prepareUpload('b',input,context);await api.uploadRecognition(transport,'b',other);assert.equal((await storage.readCache('a',api.JOBS_CACHE)).length,2);assert.equal((await storage.readCache('b',api.JOBS_CACHE)).length,1);
   const list=await api.mergeJobList('a',[{...jobs.get('a'+next.requestId),timings:{uploadMs:null,queueMs:200}}]);assert.notEqual(list[0].timings.uploadMs,null);assert.equal(list[0].timings.queueMs,200);
+  const recoveredSaved=await api.prepareUpload('saved',input,{...context,autoSave:true});
+  drafts.set('saved',{text:'milk',imageBase64:null,mimeType:'image/jpeg'});
+  drop=true;await assert.rejects(api.uploadRecognition(transport,'saved',recoveredSaved));
+  const serverJob=jobs.get('saved'+recoveredSaved.requestId);serverJob.status='completed';serverJob.reviewState='saved';
+  api=moduleInstance();const done=await api.recoverUpload(transport,'saved',[]);
+  assert.equal(done.job.reviewState,'saved');assert.equal(drafts.get('saved').text,'');assert.equal(await storage.readCache('saved',api.UPLOAD_CACHE),null);
+  assert.equal((await storage.readCache('saved',api.JOBS_CACHE))[0].reviewState,'saved');
   console.log('PASS: persisted upload ticket, lost-response and restart recovery, no duplicate uploads, safe composer clearing, multiple tasks and account isolation');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

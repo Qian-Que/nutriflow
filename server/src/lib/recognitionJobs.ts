@@ -34,7 +34,7 @@ export function publicRecognitionJob(job: RecognitionJob) {
   if (context) delete context.imageThumbnail;
   const end = job.finished_at ?? Date.now();
   return {
-    id: job.id, requestId: job.request_id, status: job.status, phase: job.phase, reviewState: job.review_state,
+    id: job.id, requestId: job.request_id, status: job.status, phase: job.review_state === 'saved' ? '已保存' : job.phase === '待校对' ? '待保存' : job.phase, reviewState: job.review_state,
     result: job.result ? JSON.parse(job.result) : undefined, message: job.error, context, createdAt: job.created_at,
     attempts: job.attempts, retryable: job.status === 'failed' && Boolean(job.input),
     timings: { uploadMs: job.upload_ms, queueMs: job.started_at || job.status === 'queued' ? Math.max(0, (job.started_at ?? end) - job.created_at) : null,
