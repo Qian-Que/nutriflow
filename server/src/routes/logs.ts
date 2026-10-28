@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { recognitionChanged } from '../lib/recognitionEvents';
 import { HttpError } from '../middleware/error';
 
 import { createId, db, nowIso } from "../lib/db";
@@ -52,7 +53,7 @@ function buildMonthRange(monthString: string) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-function mapLogRow(row: LogRow, compact = false) {
+export function mapLogRow(row: LogRow, compact = false) {
   const parseMaybeJson = (value: string | null) => {
     if (!value) {
       return null;
@@ -304,6 +305,7 @@ logsRouter.put("/:id", requireAuth, async (req, res) => {
     .get(logId, req.user!.id) as LogRow;
 
   res.json({ log: mapLogRow(row) });
+  recognitionChanged(req.user!.id);
 });
 
 logsRouter.delete("/:id", requireAuth, async (req, res) => {
@@ -318,6 +320,7 @@ logsRouter.delete("/:id", requireAuth, async (req, res) => {
   }
 
   db.prepare("DELETE FROM food_logs WHERE id = ? AND user_id = ?").run(logId, req.user!.id);
+  recognitionChanged(req.user!.id);
 
   res.json({ success: true });
 });

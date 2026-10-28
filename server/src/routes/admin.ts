@@ -33,7 +33,11 @@ adminRouter.delete("/ai-settings", (_req, res) => { resetAISettings(); res.json(
 adminRouter.post("/ai-settings/test", aiGuard, async (req, res) => {
   const route = req.query.route ?? 'primary';
   if (route !== 'primary' && route !== 'backup') { res.status(400).json({ message: '未知测试线路' }); return; }
-  const parsed = settingsSchema.safeParse(req.body);
+  const kind=req.query.kind ?? 'text';
+  if (!['text','image'].includes(String(kind))) throw new HttpError(400,'未知测试类型');
+  const image=kind==='image' ? z.object({imageBase64:z.string().min(1).max(8*1024*1024).regex(/^[A-Za-z0-9+/=\r\n]+$/),mimeType:z.enum(['image/jpeg','image/png','image/webp'])}).safeParse(req.body?.image) : null;
+  if (image && !image.success) throw new HttpError(400,'请选择有效的测试照片');
+  const parsed = settingsSchema.safeParse(kind==='image'?req.body?.settings:req.body);
   if (!parsed.success) { res.status(400).json({ message: parsed.error.issues[0]?.message }); return; }
   const draft = resolveSettings(parsed.data);
   if (route === 'backup' && !draft.aiBackupBaseUrl && !draft.aiBackupModel && !draft.aiBackupApiKey) {
@@ -42,7 +46,7 @@ adminRouter.post("/ai-settings/test", aiGuard, async (req, res) => {
   const settings = selectTestRoute(draft, route);
   if (!settings.aiApiKey) { res.status(400).json({ message: "请填写所测试线路的 API 密钥" }); return; }
   try {
-    res.json(await testPrimaryAI(settings));
+    res.json(await testPrimaryAI(settings,image?.success?image.data:undefined));
   } catch (error) { res.status(502).json(describeAITestFailure(error, settings.aiTimeoutMs)); }
 });
 adminRouter.put("/ai-settings", (req, res) => {

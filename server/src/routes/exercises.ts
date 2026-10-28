@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { recognitionChanged } from '../lib/recognitionEvents';
 import { HttpError } from '../middleware/error';
 
 import { createId, db, nowIso } from "../lib/db";
@@ -36,7 +37,7 @@ function buildDayRange(dateString: string) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-function mapExerciseRow(row: ExerciseRow) {
+export function mapExerciseRow(row: ExerciseRow) {
   return {
     id: row.id,
     userId: row.user_id,
@@ -239,6 +240,7 @@ exercisesRouter.put("/:id", requireAuth, async (req, res) => {
 
   const row = db.prepare("SELECT * FROM exercise_logs WHERE id = ?").get(id) as ExerciseRow;
   res.json({ exercise: mapExerciseRow(row) });
+  recognitionChanged(req.user!.id);
 });
 
 exercisesRouter.delete("/:id", requireAuth, async (req, res) => {
@@ -252,5 +254,6 @@ exercisesRouter.delete("/:id", requireAuth, async (req, res) => {
   }
 
   db.prepare("DELETE FROM exercise_logs WHERE id = ? AND user_id = ?").run(id, req.user!.id);
+  recognitionChanged(req.user!.id);
   res.json({ success: true });
 });

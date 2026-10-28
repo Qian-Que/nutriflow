@@ -33,9 +33,16 @@ export function publicRecognitionJob(job: RecognitionJob) {
   const context = job.context ? JSON.parse(job.context) : undefined;
   if (context) delete context.imageThumbnail;
   const end = job.finished_at ?? Date.now();
+  const result = job.result ? JSON.parse(job.result) : undefined;
+  let record: {id?:string;kind:string;deleted:boolean;calories?:number;loggedAt?:string;updatedAt?:string;edited?:boolean} | undefined;
+  if (job.review_state === 'saved' && ['FOOD','EXERCISE'].includes(result?.kind)) {
+    const table = result.kind === 'FOOD' ? 'food_logs' : 'exercise_logs';
+    const row = db.prepare(`SELECT id,calories,logged_at,created_at,updated_at FROM ${table} WHERE user_id=? AND client_request_id=?`).get(job.user_id,'recognition-'+job.id) as any;
+    record = row ? {id:row.id,kind:result.kind,deleted:false,calories:row.calories,loggedAt:row.logged_at,updatedAt:row.updated_at,edited:row.updated_at!==row.created_at} : {kind:result.kind,deleted:true};
+  }
   return {
-    id: job.id, requestId: job.request_id, status: job.status, phase: job.review_state === 'saved' ? '已保存' : job.phase === '待校对' ? '待保存' : job.phase, reviewState: job.review_state,
-    result: job.result ? JSON.parse(job.result) : undefined, message: job.error, context, createdAt: job.created_at,
+    id: job.id, requestId: job.request_id, status: job.status, phase: record?.deleted ? '记录已删除' : job.review_state === 'saved' ? (record?.edited?'已编辑':'已保存') : job.phase === '待校对' ? '待保存' : job.phase, reviewState: job.review_state,
+    result, record, message: job.error, context, createdAt: job.created_at, finishedAt:job.finished_at,
     attempts: job.attempts, retryable: job.status === 'failed' && Boolean(job.input),
     timings: { uploadMs: job.upload_ms, queueMs: job.started_at || job.status === 'queued' ? Math.max(0, (job.started_at ?? end) - job.created_at) : null,
       classificationMs: job.classification_ms, recognitionMs: job.recognition_ms, fallbackMs: job.fallback_ms,

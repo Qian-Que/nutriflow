@@ -3,7 +3,7 @@ import { readCache, readDraft, updateCache, writeCache, writeDraft } from './off
 export type RecognitionTransport = <T>(path: string, init?: RequestInit, token?: string, options?: { timeoutMs?: number }) => Promise<T>;
 export type JobTimings = { uploadMs: number | null; queueMs: number | null; classificationMs: number; recognitionMs: number; fallbackMs: number; processingMs: number | null };
 export type JobContext = { loggedAt: string; mealType: string; visibility: string; description?: string; hasImage?: boolean; imageThumbnail?: string; autoSave?: boolean };
-export type BackgroundJob = { id: string; requestId: string; status: string; phase: string; reviewState: string; result?: any; context: JobContext; createdAt: number; timings: JobTimings; message?: string; retryable: boolean; attempts: number };
+export type BackgroundJob = { id: string; requestId: string; status: string; phase: string; reviewState: string; result?: any; context: JobContext; createdAt: number; finishedAt?:number; record?:{id?:string;kind:string;deleted:boolean;calories?:number;loggedAt?:string;updatedAt?:string;edited?:boolean}; timings: JobTimings; message?: string; retryable: boolean; attempts: number };
 export type UploadTicket = { requestId: string; operation: 'entry'; input: { mode: string; description?: string; imageBase64?: string; mimeType: string }; context: JobContext };
 export const UPLOAD_CACHE = 'recognition-upload-v1';
 export const JOBS_CACHE = 'recognition-inbox-v1';

@@ -25,9 +25,9 @@ function Assert-Footer([string]$stage) {
   $tab=$ui.SelectSingleNode("//node[contains(@content-desc, ', 记录')]")
   if (!$tab) { throw "$stage : Bottom navigation did not recover" }
   $tabBounds=Bounds $tab
-  foreach($label in @('仅自己可见','好友可见','公开')) {
-    $node=$ui.SelectSingleNode("//node[@content-desc='记录可见范围：$label']")
-    if(!$node) { throw "$stage : Missing visibility option $label" }
+  foreach($label in @('visibility')) {
+    $node=$ui.SelectSingleNode("//node[starts-with(@content-desc,'可见范围：')]")
+    if(!$node) { throw "$stage : Missing visibility selector" }
     $b=Bounds $node
     if($b[3]-$b[1] -lt 40 -or $b[3] -gt $tabBounds[1]) { throw "$stage : Visibility control overlaps bottom navigation: $label $($node.bounds)" }
   }

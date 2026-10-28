@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { AppUpdateNotice, type UpdateState } from './AppUpdateNotice';
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,7 +28,21 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [backup, setBackup] = useState(false);
-  const [timings, setTimings] = useState<{ route: string; model: string; server: number; total: number }[]>([]);
+  const [timings, setTimings] = useState<{ route: string; model: string; server: number; total: number; prepare:number;kind:string }[]>([]);
+  const [testKind,setTestKind]=useState<'text'|'image'>('text');
+  const [testImage,setTestImage]=useState<{imageBase64:string;mimeType:string;uri:string;prepare:number}|null>(null);
+  const pickTestImage=async()=>{
+    setBusy(true);
+    try {
+      const selected=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:false,quality:1});
+      if(selected.canceled)return;
+      const start=Date.now(),asset=selected.assets[0];
+      const resized=await manipulateAsync(asset.uri,asset.width>1280||asset.height>1280?[{resize:asset.width>=asset.height?{width:1280}:{height:1280}}]:[],{compress:0.8,format:SaveFormat.JPEG,base64:true});
+      if(!resized.base64)throw new Error('照片处理失败');
+      setTestImage({imageBase64:resized.base64,mimeType:'image/jpeg',uri:resized.uri,prepare:Date.now()-start});
+    }catch(error){setMessage(error instanceof Error?error.message:'无法选择照片');}
+    finally{setBusy(false);}
+  };
   const text = { color: theme.text };
   const muted = { color: theme.textMuted };
   const button = [styles.button, { borderColor: theme.border, backgroundColor: theme.surface }];
@@ -62,12 +78,14 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
         const draft = payload();
         const route = kind === 'testBackup' ? 'backup' : 'primary';
         const label = route === 'backup' ? '备用线路' : '主线路';
+        if(testKind==='image'&&!testImage)throw new Error('请先选择测试照片');
         // Compatibility mode may try Responses followed by Chat Completions.
         const timeoutMs = Math.max(60000, (route === 'backup' ? draft.aiBackupTimeoutMs || draft.aiTimeoutMs : draft.aiTimeoutMs) * 2 + 15000);
         const start = Date.now();
-        const result = await request<{ elapsedMs: number; model: string }>(`/api/admin/ai-settings/test?route=${route}`, { method: 'POST', body: JSON.stringify(draft) }, token, { timeoutMs });
-        setTimings(current => [{ route: label, model: result.model, server: result.elapsedMs, total: Date.now() - start }, ...current].slice(0, 4));
-        setMessage(`${label}文字测试通过；配置未发布`);
+        const body=testKind==='image'?{settings:draft,image:{imageBase64:testImage!.imageBase64,mimeType:testImage!.mimeType}}:draft;
+        const result = await request<{ elapsedMs: number; model: string }>(`/api/admin/ai-settings/test?route=${route}&kind=${testKind}`, { method: 'POST', body: JSON.stringify(body) }, token, { timeoutMs });
+        setTimings(current => [{ route: label, model: result.model, server: result.elapsedMs, total: Date.now() - start,prepare:testKind==='image'?testImage!.prepare:0,kind:testKind }, ...current].slice(0, 4));
+        setMessage(`${label}${testKind==='image'?'照片':'文字'}测试通过；未保存记录，配置未发布`);
       } else {
         const data = await request<Settings>('/api/admin/ai-settings', { method: kind === 'save' ? 'PUT' : 'DELETE', ...(kind === 'save' ? { body: JSON.stringify(payload()) } : {}) }, token);
         apply(data);
@@ -109,8 +127,8 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
         {loading && <ActivityIndicator color={theme.accent} />}
         {!!message && <Text accessibilityLiveRegion='polite' style={[styles.message, text, { backgroundColor: theme.accentSoft }]}>{message}</Text>}
         {timings.map((timing, index) => <View key={index} style={{ borderBottomWidth: 1, borderBottomColor: theme.border, paddingBottom: 10, gap: 4 }}>
-          <Text style={text}>{timing.route} · {timing.model}</Text>
-          <Text style={muted}>后端识别 {(timing.server / 1000).toFixed(1)} 秒 · 总等待 {(timing.total / 1000).toFixed(1)} 秒</Text>
+          <Text style={text}>{timing.route} · {timing.kind==='image'?'照片':'文字'} · {timing.model}</Text>
+          <Text style={muted}>{timing.kind==='image'?`照片处理 ${(timing.prepare/1000).toFixed(1)} 秒 · `:''}后端识别 {(timing.server / 1000).toFixed(1)} 秒 · 传输及往返 {(Math.max(0,timing.total-timing.server)/1000).toFixed(1)} 秒 · 总计 {((timing.total+timing.prepare)/1000).toFixed(1)} 秒</Text>
         </View>)}
         {!loading && !settings && <Pressable onPress={() => void load()} style={button}><Ionicons name='refresh-outline' size={18} color={theme.accent} /><Text style={text}>刷新设置</Text></Pressable>}
         {admin && settings && <View style={[styles.section, { borderTopColor: theme.border }]}>
@@ -134,6 +152,13 @@ export function SettingsPanel({ token, email, request, theme, onClose, onLogout,
             {field(`备用密钥${settings.hasBackupApiKey ? '（已配置）' : ''}`, 'aiBackupApiKey', true)}
             {field('备用超时（毫秒，0 为跟随主线路）', 'aiBackupTimeoutMs', false, true)}
           </>}
+          <View style={styles.row}>
+            {(['text','image'] as const).map(kind=><Pressable key={kind} accessibilityRole='radio' accessibilityLabel={kind==='text'?'文字测速':'照片测速'} accessibilityState={{checked:testKind===kind}} disabled={busy} onPress={()=>setTestKind(kind)} style={[button,testKind===kind&&{backgroundColor:theme.accentSoft}]}><Ionicons name={kind==='text'?'document-text-outline':'image-outline'} size={18} color={theme.accent}/><Text style={text}>{kind==='text'?'文字':'照片'}</Text></Pressable>)}
+          </View>
+          {testKind==='image'&&<View style={styles.row}>
+            {testImage&&<Image source={{uri:testImage.uri}} style={{width:64,height:64,borderRadius:6}}/>}
+            <Pressable disabled={busy} accessibilityLabel='选择测速照片' onPress={()=>void pickTestImage()} style={button}><Ionicons name='image-outline' size={18} color={theme.accent}/><Text style={text}>{testImage?'更换照片':'选择照片'}</Text></Pressable>
+          </View>}
           <View style={styles.row}>
             <Pressable disabled={busy} onPress={() => void action('test')} style={button}><Ionicons name='pulse-outline' size={18} color={theme.accent} /><Text style={text}>测试主线路</Text></Pressable>
             {backup && <Pressable disabled={busy} onPress={() => void action('testBackup')} style={button}><Ionicons name='pulse-outline' size={18} color={theme.accent} /><Text style={text}>测试备用线路</Text></Pressable>}

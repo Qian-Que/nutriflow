@@ -10,6 +10,8 @@ import { REVIEW_CACHE_KEY, reviewCacheKey, reviewBody, type ReviewDraft } from '
 import { useRecognitionInbox } from './useRecognitionInbox';
 import { RecognitionInbox } from './RecognitionInbox';
 import { RecordActions } from './RecordActions';
+import { QuickFoodSheet, VisibilitySheet } from './QuickRecordControls';
+import { quickFoodBody } from './quickFood';
 import * as SplashScreen from 'expo-splash-screen';
 import { UPLOAD_CACHE, matchesUploadDraft, type BackgroundJob, type UploadTicket } from './backgroundRecognition';
 import { AppUpdateNotice, useAppUpdate, type UpdateState } from './AppUpdateNotice';
@@ -47,7 +49,7 @@ const LEGACY_API_BASE_URL_STORAGE_KEY = "nutrition_app_api_base_url_v1";
 const VISIBILITY_PREF_STORAGE_KEY = "nutrition_app_visibility_pref_v1";
 const JOURNAL_THEME_STORAGE_KEY = "nutrition_app_journal_theme_v1";
 const CLOUD_DEFAULT_API_BASE_URL = "https://strong-amazement-production-c91d.up.railway.app";
-const APP_BUILD_LABEL = "2026-10-25-r26";
+const APP_BUILD_LABEL = "2026-10-28-r27";
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 const parsedTimeoutMs = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000);
 const API_REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
@@ -2314,6 +2316,11 @@ function DashboardScreen({
   const [reviewReady, setReviewReady] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [visibilityOpen,setVisibilityOpen]=useState(false);
+  const [quickFood,setQuickFood]=useState<{log:FoodLog;clientRequestId:string;loggedAt:string;date:string;visibility:Visibility;mealType:MealType}|null>(null);
+  const quickBodyRef=useRef<Record<string,unknown>|null>(null);
+  const [savedNotice,setSavedNotice]=useState<BackgroundJob|null>(null),[noticeBusy,setNoticeBusy]=useState(false);
+  const noticeLock=useRef(false),notifiedJobs=useRef(new Set<string>()),openedAt=useRef(Date.now());
   const [actionRecord,setActionRecord] = useState<{kind:'food';log:FoodLog}|{kind:'exercise';exercise:ExerciseLog}|null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const savingReviewRef = useRef(false);
@@ -2408,6 +2415,17 @@ function DashboardScreen({
   const inbox = useRecognitionInbox(rawApiRequest, token);
   const inboxJobs = inbox.jobs.filter(job => !pending.some(entry => entry.id === `recognition-${job.id}`));
   const savedJobIds = inbox.jobs.filter(job => job.reviewState === 'saved').map(job => job.id).sort().join(',');
+  const activeInboxJobs=inboxJobs.filter(job=>job.reviewState!=='saved');
+  useEffect(()=>{
+    const recent=inbox.jobs.filter(job=>job.reviewState==='saved'&&!job.record?.deleted&&job.record?.id&&job.createdAt>=openedAt.current&&!notifiedJobs.current.has(job.id));
+    for(const job of recent)notifiedJobs.current.add(job.id);
+    if(recent.length)setSavedNotice(recent.sort((a,b)=>(b.finishedAt??0)-(a.finishedAt??0))[0]);
+  },[inbox.jobs]);
+  useEffect(()=>{
+    if(!savedNotice||noticeBusy)return;
+    const timer=setTimeout(()=>setSavedNotice(null),15000);
+    return()=>clearTimeout(timer);
+  },[savedNotice,noticeBusy]);
 
   useEffect(() => {
     setKeyboardVisible(false);
@@ -2788,6 +2806,33 @@ function DashboardScreen({
     setSyncMessage(state==='pending'?'记录已保留，联网后同步':'已再记一餐');
     void load({silent:true});void loadCalendar({silent:true});
   };
+  const saveQuickFood=async(factor:number)=>{
+    if(!quickFood)return;
+    if(!quickBodyRef.current)quickBodyRef.current=quickFoodBody(quickFood.log,factor,quickFood);
+    const state=await persistWithAmbiguousRecovery('/api/logs',quickBodyRef.current,token);
+    setSyncMessage(state==='pending'?'记录已保留，联网后同步':'已记入常用餐食');
+    void load({silent:true});void loadCalendar({silent:true});
+  };
+  const editSavedJob=async(job:BackgroundJob)=>{
+    const saved=await rawApiRequest<{kind:string;log?:FoodLog;exercise?:ExerciseLog}>(`/api/recognition/jobs/${job.id}/record`,{},token);
+    const record=saved.log??saved.exercise!;
+    setSelectedDate(toLogDate(record.loggedAt));setDetailLogId(null);setDetailExerciseId(null);setInboxOpen(false);
+    if(saved.log){setLogs(current=>[saved.log!,...current.filter(log=>log.id!==saved.log!.id)]);openEditLogModal(saved.log);}
+    else if(saved.exercise){setExercises(current=>[saved.exercise!,...current.filter(log=>log.id!==saved.exercise!.id)]);openEditExerciseModal(saved.exercise);}
+  };
+  const noticeAction=async(action:'edit'|'undo')=>{
+    if(!savedNotice||noticeLock.current)return;
+    noticeLock.current=true;setNoticeBusy(true);
+    try{
+      if(action==='edit')await editSavedJob(savedNotice);
+      else{
+        await rawApiRequest(`/api/recognition/jobs/${savedNotice.id}/undo`,{method:'POST',body:JSON.stringify({updatedAt:savedNotice.record?.updatedAt})},token);
+        void load({silent:true});void loadCalendar({silent:true});void inbox.refresh();
+      }
+      setSavedNotice(current=>current?.id===savedNotice.id?null:current);
+    }catch(error){Alert.alert('操作未完成',normalizeErrorMessage(error));}
+    finally{noticeLock.current=false;setNoticeBusy(false);}
+  };
 
   const closeEditModal = useCallback(() => {
     if (savingEdit) {
@@ -2992,6 +3037,7 @@ function DashboardScreen({
 
   const openTaskReview = async (job: BackgroundJob) => {
     try {
+      if(job.reviewState==='saved'){await editSavedJob(job);return;}
       const cached = await readCache<ReviewDraft>(token,reviewCacheKey(job.id));
       let draft = cached;
       if (!draft) {
@@ -3449,6 +3495,7 @@ function DashboardScreen({
             <Text style={[styles.journalDateArrow, themedJournal.mutedText]}>{calendarExpanded ? '▲' : '▼'}</Text>
           </Pressable>
           <Text style={[styles.journalRemainText, themedJournal.softText]}>{formatSignedKcalChange(calorieChangeFromPreviousDay)}</Text>
+          <Pressable accessibilityRole='button' accessibilityLabel='识别历史' hitSlop={8} style={[styles.journalThemeToggle,themedJournal.surface]} onPress={()=>{Keyboard.dismiss();setInboxOpen(true);void inbox.refresh();}}><Ionicons name='time-outline' size={19} color={journalTheme.text}/></Pressable>
           <Pressable accessibilityLabel='切换日夜主题' hitSlop={8} style={[styles.journalThemeToggle, themedJournal.surface]} onPress={toggleJournalTheme}>
             <Ionicons name={journalThemeMode === 'night' ? 'moon-outline' : 'sunny-outline'} size={19} color={journalTheme.text} />
           </Pressable>
@@ -3609,7 +3656,7 @@ function DashboardScreen({
 
         </>}
         {!keyboardVisible && !!favorites.length && <ScrollView horizontal style={{ maxHeight: 42 }} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-          {favorites.map(log => <Pressable key={log.id} style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => { setConversationInput(summarizeFoodFromLog(log)); }} onLongPress={() => {
+          {favorites.map(log => <Pressable key={log.id} accessibilityRole='button' accessibilityLabel={`常用餐食：${summarizeFoodFromLog(log)}`} style={[styles.journalMiniButton, themedJournal.surfaceAlt]} onPress={() => {quickBodyRef.current=null;setQuickFood({log,clientRequestId:createConversationMessageId(),loggedAt:buildLoggedAtForSelectedDate(selectedDate),date:selectedDate,visibility:conversationVisibility,mealType:inferMealTypeForDate(selectedDate)});}} onLongPress={() => {
             const next = favorites.filter(item => item.id !== log.id); setFavorites(next); void writeCache(token, 'favorites', next).catch(() => setSyncMessage('常用餐食保存失败'));
           }}><Text style={[styles.hint, themed.hint]}>{summarizeFoodFromLog(log)}</Text></Pressable>)}
         </ScrollView>}
@@ -3706,7 +3753,7 @@ function DashboardScreen({
           })}
         </ScrollView>
 
-        {(inboxJobs.length > 0 || inbox.ticket) && !keyboardVisible && <Pressable accessibilityRole='button' accessibilityLabel='打开识别任务' onPress={() => {setInboxOpen(true);void inbox.refresh();}} style={{minHeight:44,padding:10,gap:8,flexDirection:'row',alignItems:'center',backgroundColor:journalTheme.accentSoft}}>
+        {(activeInboxJobs.length > 0 || inbox.ticket) && !keyboardVisible && <Pressable accessibilityRole='button' accessibilityLabel='打开识别任务' onPress={() => {setInboxOpen(true);void inbox.refresh();}} style={{minHeight:44,padding:10,gap:8,flexDirection:'row',alignItems:'center',backgroundColor:journalTheme.accentSoft}}>
           <Ionicons name='albums-outline' size={20} color={journalTheme.accent}/><Text style={{flex:1,color:journalTheme.text}}>识别任务{inboxJobs.some(job=>['queued','running'].includes(job.status))?` · ${inboxJobs.filter(job=>['queued','running'].includes(job.status)).length} 处理中`:''}{inboxJobs.some(job=>job.status==='completed'&&job.reviewState==='pending')?` · ${inboxJobs.filter(job=>job.status==='completed'&&job.reviewState==='pending').length} 待保存`:''}{inboxJobs.some(job=>job.status==='failed')?` · ${inboxJobs.filter(job=>job.status==='failed').length} 失败`:''}{inbox.ticket?' · 上传待确认':''}{inboxJobs.every(job=>job.reviewState==='saved')&&!inbox.ticket?' · 已完成':''}</Text><Ionicons name='chevron-forward' size={18} color={journalTheme.accent}/>
         </Pressable>}
         {legacyReview && <Pressable accessibilityRole='button' accessibilityLabel='继续校对识别结果' onPress={() => {setReview(legacyReview);setReviewOpen(true);}} style={{ padding: 10, gap: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: journalTheme.accentSoft }}>
@@ -3723,6 +3770,12 @@ function DashboardScreen({
         ) : null}
 
         <View style={styles.journalComposerFooter}>
+        {savedNotice&&!keyboardVisible&&<View accessibilityLiveRegion='polite' style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:8,paddingHorizontal:8,backgroundColor:journalTheme.accentSoft,borderRadius:6}}>
+          <Text style={{flex:1,minWidth:80,color:journalTheme.text}}>已记录 {Math.round(savedNotice.record?.calories??0)} kcal</Text>
+          <Pressable accessibilityRole='button' accessibilityLabel='编辑刚保存的记录' disabled={noticeBusy} onPress={()=>void noticeAction('edit')} style={{minHeight:44,flexDirection:'row',alignItems:'center',gap:4}}><Ionicons name='create-outline' size={18} color={journalTheme.accent}/><Text style={{color:journalTheme.accent}}>编辑</Text></Pressable>
+          <Pressable accessibilityRole='button' accessibilityLabel='撤销刚保存的记录' disabled={noticeBusy} onPress={()=>void noticeAction('undo')} style={{minHeight:44,flexDirection:'row',alignItems:'center',gap:4}}><Ionicons name='arrow-undo-outline' size={18} color={journalTheme.accent}/><Text style={{color:journalTheme.accent}}>撤销</Text></Pressable>
+          <Pressable accessibilityLabel='关闭保存提示' disabled={noticeBusy} onPress={()=>setSavedNotice(null)} style={{width:32,height:44,alignItems:'center',justifyContent:'center'}}><Ionicons name='close' size={18} color={journalTheme.textMuted}/></Pressable>
+        </View>}
         <View style={[styles.composerModeRow, { borderTopColor: journalTheme.border }]}>
           {([{ value: 'AUTO', label: '自动', icon: 'sparkles-outline' }, { value: 'FOOD', label: '饮食', icon: 'restaurant-outline' }, { value: 'EXERCISE', label: '运动', icon: 'fitness-outline' }] as const).map(option => (
             <Pressable key={option.value} accessibilityRole='radio' accessibilityLabel={`记录类型：${option.label}`} accessibilityState={{ checked: entryMode === option.value }} disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)}
@@ -3766,26 +3819,9 @@ function DashboardScreen({
         </View>
 
         <View style={styles.journalComposerMetaRow}>
-          <Text style={[styles.journalMutedText, themedJournal.mutedText]}>可见范围</Text>
-          <View style={styles.journalVisibilityRow}>
-            {visibilityOptions.map((option) => {
-              const active = conversationVisibility === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)}
-                  accessibilityRole='radio'
-                  accessibilityLabel={`记录可见范围：${option.label}`}
-                  accessibilityState={{checked:active}}
-                  aria-checked={active}
-                  style={[styles.journalVisibilityChip, themedJournal.surfaceAlt, active && themedJournal.activeChip]}
-                  onPress={() => setConversationVisibility(option.value)}
-                >
-                  <Text style={[styles.journalVisibilityText, themedJournal.mutedText, active && themedJournal.activeText]}>{option.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Pressable accessibilityRole='button' accessibilityLabel={`可见范围：${visibilityOptions.find(option=>option.value===conversationVisibility)?.label}`} disabled={conversationLoading || imageProcessing || Boolean(inbox.ticket)} onPress={()=>{Keyboard.dismiss();setVisibilityOpen(true);}} style={{minHeight:44,flexDirection:'row',alignItems:'center',gap:6}}>
+            <Ionicons name={conversationVisibility==='PRIVATE'?'lock-closed-outline':conversationVisibility==='FRIENDS'?'people-outline':'globe-outline'} size={16} color={journalTheme.accent}/><Text style={[styles.journalVisibilityText,themedJournal.mutedText]}>{visibilityOptions.find(option=>option.value===conversationVisibility)?.label}</Text><Ionicons name='chevron-down' size={14} color={journalTheme.textMuted}/>
+          </Pressable>
         </View>
 
         </View>
@@ -3964,6 +4000,8 @@ function DashboardScreen({
             </View>
           </KeyboardAvoidingView>
         </Modal>
+        {quickFood&&<QuickFoodSheet title={summarizeFoodFromLog(quickFood.log)} calories={quickFood.log.calories} date={quickFood.date} visibility={visibilityOptions.find(option=>option.value===quickFood.visibility)?.label??''} theme={journalTheme} onClose={()=>setQuickFood(null)} onSave={saveQuickFood}/>}
+        {visibilityOpen&&<VisibilitySheet value={conversationVisibility} options={visibilityOptions} theme={journalTheme} onChange={value=>setConversationVisibility(value as Visibility)} onClose={()=>setVisibilityOpen(false)}/>}
         {actionRecord && <RecordActions title={actionRecord.kind==='food'?summarizeFoodFromLog(actionRecord.log):actionRecord.exercise.exerciseType}
           pending={(actionRecord.kind==='food'?actionRecord.log.id:actionRecord.exercise.id).startsWith('pending-')} theme={journalTheme} date={selectedDate}
           favorite={actionRecord.kind==='food'&&favorites.some(log=>log.id===actionRecord.log.id)}
@@ -6267,6 +6305,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   journalDateButton: {
+    maxWidth:'45%',
+    flexShrink:1,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
@@ -6278,6 +6318,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   journalDateText: {
+    flexShrink:1,
     color: "#f5f8ff",
     fontSize: 16,
     fontWeight: "600",
@@ -6288,6 +6329,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   journalThemeToggle: {
+    flexShrink:0,
     width: 34,
     height: 34,
     borderRadius: 999,
@@ -6305,6 +6347,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   journalRemainText: {
+    flex:1,
+    minWidth:0,
+    textAlign:'right',
     marginLeft: "auto",
     color: "#c8d7f3",
     fontSize: 13,

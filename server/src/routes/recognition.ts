@@ -11,8 +11,9 @@ import { publicAIError } from '../lib/aiErrors';
 import { classifyEntry } from '../services/aiClassifier';
 import { analyzeFoodImage, analyzeFoodText } from '../services/aiNutrition';
 import { analyzeExerciseImage, analyzeExerciseText } from '../services/aiExercise';
-import { createFoodRecord } from './logs';
-import { createExerciseRecord } from './exercises';
+import { createFoodRecord, mapLogRow } from './logs';
+import { createExerciseRecord, mapExerciseRow } from './exercises';
+import { onRecognitionChange, recognitionChanged } from '../lib/recognitionEvents';
 
 const contextSchema = z.object({
   loggedAt: z.iso.datetime(), mealType: z.enum(['BREAKFAST','LUNCH','DINNER','SNACK']),
@@ -52,6 +53,7 @@ function saveJobRecord(job: Job, body: Record<string, unknown>) {
     delete context.imageThumbnail;
     db.prepare("UPDATE recognition_jobs SET review_state='saved',phase='已保存',error=NULL,input=NULL,context=? WHERE id=?").run(JSON.stringify(context),job.id);
     db.exec('RELEASE save_recognition');
+    recognitionChanged(job.user_id);
     return saved;
   } catch (error) { db.exec('ROLLBACK TO save_recognition; RELEASE save_recognition'); throw error; }
 }
@@ -81,6 +83,7 @@ export function recoverAutomaticSaves() {
 }
 async function step<T>(job: Job, label: string, column: 'classification_ms' | 'recognition_ms' | 'fallback_ms', run: () => Promise<T>) {
   db.prepare('UPDATE recognition_jobs SET phase=? WHERE id=?').run(label, job.id);
+  recognitionChanged(job.user_id);
   const start = Date.now();
   try { return await run(); }
   finally { db.prepare(`UPDATE recognition_jobs SET ${column}=${column}+? WHERE id=?`).run(Date.now() - start, job.id); }
@@ -117,7 +120,7 @@ async function processJob(job: Job) {
   } catch (error) {
     const failure = error instanceof Error && error.message.startsWith('无法判断记录类型') ? { status: 422, message: error.message } : publicAIError(error);
     db.prepare("UPDATE recognition_jobs SET status='failed',phase='识别失败',finished_at=?,input=CASE WHEN review_state='pending' THEN input ELSE NULL END,error=?,result=? WHERE id=?").run(Date.now(),failure.message,JSON.stringify({status:failure.status}),job.id);
-  } finally { running--; active.delete(job.user_id); pump(); }
+  } finally { recognitionChanged(job.user_id); running--; active.delete(job.user_id); pump(); }
 }
 function pump() {
   while (running < maximumRunning) {
@@ -166,10 +169,52 @@ recognitionRouter.post('/jobs', (req,res) => {
     .run(id,req.user!.id,data.requestId,fingerprint,data.operation,JSON.stringify(data.input),Date.now(),context ? JSON.stringify(context) : null,context ? 'pending' : null);
   res.status(202).json(publicRecognitionJob(owned(id,req.user!.id))); setImmediate(pump);
 });
+function jobSnapshot(userId: string, includeSaved: boolean) {
+  const jobs = db.prepare("SELECT * FROM recognition_jobs WHERE user_id=? AND review_state='pending' ORDER BY created_at DESC LIMIT 50").all(userId) as Job[];
+  if (includeSaved) jobs.push(...db.prepare("SELECT * FROM recognition_jobs WHERE user_id=? AND review_state='saved' ORDER BY finished_at DESC LIMIT 20").all(userId) as Job[]);
+  const items = jobs.map(publicRecognitionJob);
+  const version = createHash('sha256').update(JSON.stringify(items.map(({timings,...item})=>({...item,timings:{uploadMs:timings.uploadMs,classificationMs:timings.classificationMs,recognitionMs:timings.recognitionMs,fallbackMs:timings.fallbackMs}})))).digest('hex');
+  return {jobs:items,version};
+}
 recognitionRouter.get('/jobs', (req,res) => {
-  const jobs = db.prepare("SELECT * FROM recognition_jobs WHERE user_id=? AND review_state='pending' ORDER BY created_at DESC LIMIT 50").all(req.user!.id) as Job[];
-  if (req.query.includeSaved === '1') jobs.push(...db.prepare("SELECT * FROM recognition_jobs WHERE user_id=? AND review_state='saved' ORDER BY finished_at DESC LIMIT 20").all(req.user!.id) as Job[]);
-  res.json({jobs:jobs.map(publicRecognitionJob)});
+  res.json(jobSnapshot(req.user!.id,req.query.includeSaved === '1'));
+});
+recognitionRouter.get('/changes', (req,res) => {
+  if (!allowWindow('recognition-watch:'+req.user!.id,120,60000)) throw new HttpError(429,'刷新过于频繁');
+  const snapshot = () => jobSnapshot(req.user!.id,true).version;
+  const current = snapshot();
+  if (typeof req.query.version !== 'string' || req.query.version !== current) { res.json({version:current,changed:true}); return; }
+  // One bounded long-poll wakes immediately on this account's job transitions.
+  let stopped = false;
+  const finish = (send: boolean) => {
+    if (stopped) return;
+    stopped=true;clearTimeout(timer);unsubscribe();res.off('close',closed);
+    if (send) { const version=snapshot();res.json({version,changed:version!==current}); }
+  };
+  const closed=()=>finish(false);
+  const unsubscribe=onRecognitionChange(req.user!.id,()=>finish(true));
+  const timer=setTimeout(()=>finish(true),20000);
+  res.on('close',closed);
+  if (snapshot()!==current) finish(true);
+});
+recognitionRouter.get('/jobs/:id/record', (req,res) => {
+  const job=owned(String(req.params.id),req.user!.id);
+  const record=publicRecognitionJob(job).record;
+  if (!record || record.deleted) throw new HttpError(404,'原记录已不存在');
+  const table=record.kind==='FOOD'?'food_logs':'exercise_logs';
+  const row=db.prepare(`SELECT * FROM ${table} WHERE id=? AND user_id=?`).get(record.id!,req.user!.id) as any;
+  res.json(record.kind==='FOOD'?{kind:'FOOD',log:mapLogRow(row,true)}:{kind:'EXERCISE',exercise:mapExerciseRow(row)});
+});
+recognitionRouter.post('/jobs/:id/undo', (req,res) => {
+  const job=owned(String(req.params.id),req.user!.id);
+  const record=publicRecognitionJob(job).record;
+  if (!record) throw new HttpError(409,'任务尚未保存');
+  if (record.deleted) {res.json({ok:true});return;}
+  if (!req.body?.updatedAt || req.body.updatedAt!==record.updatedAt) throw new HttpError(409,'记录已被修改，请从记录中检查后删除');
+  const table=record.kind==='FOOD'?'food_logs':'exercise_logs';
+  db.prepare(`DELETE FROM ${table} WHERE id=? AND user_id=?`).run(record.id!,req.user!.id);
+  recognitionChanged(req.user!.id);
+  res.json({ok:true});
 });
 recognitionRouter.get('/jobs/:id', (req,res) => { res.json(publicRecognitionJob(owned(String(req.params.id),req.user!.id))); });
 recognitionRouter.delete('/uploads/:requestId', (req,res) => {

@@ -1,0 +1,8 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),ts=require('typescript');
+function load(file){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../'+file+'.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:()=>load('nutritionEditing')});return exports;}
+const {quickFoodBody}=load('quickFood');
+const food={id:'old-id',clientRequestId:'old-request',calories:200,proteinGram:10,carbsGram:20,fatGram:8,fiberGram:4,nutrients:{calciumMg:300},items:[{name:'milk',estimatedWeightGram:250,calories:200}],imageUri:'/api/logs/deleted/image',source:'AI',aiModel:'gemini',visibility:'PUBLIC',loggedAt:'old-date'};
+const context={clientRequestId:'stable-new-id',loggedAt:'2026-10-28T00:00:00Z',visibility:'PRIVATE',mealType:'BREAKFAST'};
+for(const factor of [0.5,1,2]){const body=quickFoodBody(food,factor,context);assert.equal(body.calories,200*factor);assert.equal(body.nutrients.calciumMg,300*factor);assert.equal(body.items[0].estimatedWeightGram,250*factor);assert.equal(body.visibility,'PRIVATE');assert.equal(body.clientRequestId,'stable-new-id');assert.equal(body.loggedAt,context.loggedAt);assert(!body.id&&!body.imageUri);assert.equal(body.aiModel,'gemini');}
+assert.equal(food.calories,200);assert.throws(()=>quickFoodBody(food,0,context));assert.throws(()=>quickFoodBody({...food,calories:NaN},1,context));
+console.log('PASS: portions, item and micronutrient scaling, selected date/privacy, stable request ID, no stale image reference and immutable favorite');

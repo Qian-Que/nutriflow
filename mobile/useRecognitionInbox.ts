@@ -10,14 +10,16 @@ export function useRecognitionInbox(transport: RecognitionTransport, token: stri
   const active = useRef(true), fetching = useRef(false), submitting = useRef(false), nextRecovery = useRef(0);
   const generation = useRef(0);
   const needsPoll = useRef(false);
+  const serverVersion = useRef(''), watching = useRef(false), watchAfter = useRef(0);
   needsPoll.current = jobs.some(job => ['queued','running'].includes(job.status)) || Boolean(ticket);
   const refresh = useCallback(async (recover = false) => {
     if (fetching.current || submitting.current || AppState.currentState !== 'active') return;
     fetching.current = true;
     const version = generation.current;
     try {
-      const response = await transport<{jobs:BackgroundJob[]}>('/api/recognition/jobs?includeSaved=1',{},token,{timeoutMs:8000});
+      const response = await transport<{jobs:BackgroundJob[];version?:string}>('/api/recognition/jobs?includeSaved=1',{},token,{timeoutMs:8000});
       if (submitting.current || generation.current !== version) return;
+      serverVersion.current=response.version ?? '';
       let list = await mergeJobList(token,response.jobs);
       if (recover && !submitting.current) {
         const allowPost = Date.now() >= nextRecovery.current;
@@ -42,6 +44,8 @@ export function useRecognitionInbox(transport: RecognitionTransport, token: stri
     finally { fetching.current = false; }
   }, [transport,token]);
   useEffect(() => {
+    let disposed=false;
+    serverVersion.current='';
     active.current = true;
     void (async () => {
       try {
@@ -50,9 +54,19 @@ export function useRecognitionInbox(transport: RecognitionTransport, token: stri
       } catch { if (active.current) setMessage('本地任务缓存读取失败'); }
       if (active.current) void refresh(true);
     })();
-    const interval = setInterval(() => { if (needsPoll.current) void refresh(true); },4000);
+    const watch = async () => {
+      if (!needsPoll.current || watching.current || AppState.currentState!=='active' || Date.now()<watchAfter.current) return;
+      watching.current=true;
+      try {
+        if (!serverVersion.current) { watchAfter.current=Date.now()+3000;await refresh(true);return; }
+        const result=await transport<{changed:boolean}>(`/api/recognition/changes?version=${serverVersion.current}`,{},token,{timeoutMs:25000});
+        if (!disposed && active.current && result.changed) await refresh(true);
+      } catch { watchAfter.current=Date.now()+4000;if(!disposed && active.current)await refresh(true); }
+      finally {watching.current=false;}
+    };
+    const interval = setInterval(() => { void watch(); },1000);
     const subscription = AppState.addEventListener('change',state => { if (state === 'active') void refresh(true); });
-    return () => { active.current = false; clearInterval(interval); subscription.remove(); };
+    return () => { disposed=true;active.current = false;generation.current++; clearInterval(interval); subscription.remove(); };
   },[refresh,token]);
   const submit = async (input: UploadTicket['input'], context: JobContext) => {
     if (submitting.current) return;

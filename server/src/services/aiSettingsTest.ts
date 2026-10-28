@@ -1,12 +1,12 @@
 import { AISettings, withPreviewSettings } from "../lib/aiSettings";
-import { analyzeFoodText } from "./aiNutrition";
+import { analyzeFoodText, analyzeFoodImage } from "./aiNutrition";
 import { GeminiResponseError } from "./geminiResponse";
 
-export async function testPrimaryAI(settings: AISettings) {
+export async function testPrimaryAI(settings: AISettings, image?: {imageBase64:string;mimeType:string}) {
   const started = Date.now();
   // Use the configured timeout and the real recognition adapter, but never publish the draft or use a backup.
-  const result = await withPreviewSettings({ ...settings, aiBackupBaseUrl: "", aiBackupModel: "", aiBackupApiKey: "" }, () => analyzeFoodText("一杯250毫升纯牛奶"));
-  return { ok: true, model: result.ai?.model, elapsedMs: Date.now() - started };
+  const result = await withPreviewSettings({ ...settings, aiBackupBaseUrl: "", aiBackupModel: "", aiBackupApiKey: "" }, () => image ? analyzeFoodImage(image.imageBase64,image.mimeType) : analyzeFoodText("一杯250毫升纯牛奶"));
+  return { ok: true, model: result.ai?.model, elapsedMs: Date.now() - started, kind:image?'image':'text' };
 }
 
 export function selectTestRoute(settings: AISettings, route: 'primary' | 'backup'): AISettings {

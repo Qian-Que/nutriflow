@@ -36,13 +36,14 @@ export function RecognitionInbox({jobs,ticket,busy,message,theme,baseUrl,token,o
         {visible.map(job => <View key={job.id} style={[styles.item,{borderColor:theme.border}]}>
           <View style={styles.row}>
             {job.context.hasImage && job.reviewState!=='saved' && <RecordImage uri={`/api/recognition/jobs/${job.id}/image?size=thumb`} baseUrl={baseUrl} token={token} style={{width:54,height:54,borderRadius:6}}/>}
-            <View style={{flex:1,gap:5}}><Text style={{color:theme.text,fontSize:15,fontWeight:'600'}} numberOfLines={2}>{job.context.description || '照片记录'}</Text><Text style={{color:theme.textMuted,fontSize:12}}>{jobDate(job.context.loggedAt)}</Text><Text style={{color:job.status==='failed'?theme.danger:theme.textMuted,fontSize:12}}>{job.phase}{job.status==='running' ? ` · 已处理 ${seconds(job.timings.processingMs)}` : ''}{job.attempts>1 ? ` · 第 ${job.attempts} 次` : ''}</Text></View>
+            <View style={{flex:1,gap:5}}><Text style={{color:theme.text,fontSize:15,fontWeight:'600'}} numberOfLines={2}>{job.context.description || '照片记录'}</Text><Text style={{color:theme.textMuted,fontSize:12}}>{jobDate(job.record?.loggedAt ?? job.context.loggedAt)}</Text><Text style={{color:job.status==='failed'?theme.danger:theme.textMuted,fontSize:12}}>{job.phase}{job.status==='running' ? ` · 已处理 ${seconds(job.timings.processingMs)}` : ''}{job.attempts>1 ? ` · 第 ${job.attempts} 次` : ''}</Text></View>
             {['running','queued'].includes(job.status) && <ActivityIndicator color={theme.accent}/>}
           </View>
           <TimingDetails timings={job.timings} color={theme.textMuted}/>
-          {job.reviewState==='saved' && <Text style={{color:theme.text}}>已保存 · {Math.round(job.result?.analysis?.totals?.calories ?? job.result?.analysis?.calories ?? 0)} 千卡</Text>}
+          {job.reviewState==='saved' && !job.record?.deleted && <Text style={{color:theme.text}}>当前记录 · {Math.round(job.record?.calories ?? job.result?.analysis?.totals?.calories ?? job.result?.analysis?.calories ?? 0)} 千卡</Text>}
           {!!job.message && <Text style={{color:theme.danger,lineHeight:21}}>{job.message}</Text>}
           <View style={styles.row}>
+            {job.reviewState==='saved' && !job.record?.deleted && <Pressable accessibilityRole='button' accessibilityLabel={`编辑已保存记录：${job.context.description || '照片记录'}`} onPress={()=>onOpen(job)} style={styles.action}><Ionicons name='create-outline' size={19} color={theme.accent}/><Text style={{color:theme.accent}}>编辑记录</Text></Pressable>}
             {job.status==='completed' && job.reviewState==='pending' && <>
               <Pressable disabled={Boolean(saving)} accessibilityRole='button' accessibilityLabel={`直接保存：${job.context.description || '照片记录'}`} onPress={()=>{setSaving(job.id);void onSave(job).finally(()=>setSaving(null));}} style={styles.action}>{saving===job.id?<ActivityIndicator color={theme.accent}/>:<Ionicons name='checkmark-outline' size={19} color={theme.accent}/>}<Text style={{color:theme.accent}}>直接保存</Text></Pressable>
               <Pressable disabled={Boolean(saving)} accessibilityRole='button' accessibilityLabel={`编辑：${job.context.description || '照片记录'}`} onPress={()=>onOpen(job)} style={styles.action}><Ionicons name='create-outline' size={19} color={theme.accent}/><Text style={{color:theme.accent}}>编辑</Text></Pressable>
